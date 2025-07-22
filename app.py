@@ -16,7 +16,7 @@ from datetime import datetime
 # --- Configuration ---
 # IMPORTANT: For production deployments (e.g., Streamlit Community Cloud),
 # ALWAYS use Streamlit's secrets management for API keys.
-# Learn more here: [https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management](https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management)
+# Learn more here: https://docs.streamlit.io/deploy/streamlit-cloud/secrets-analysis.md
 # Example: GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 # For local testing, you can keep it directly or load from an environment variable.
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # Replace with your actual key or st.secrets
@@ -63,10 +63,10 @@ def gemini_infer_schema_details(context: dict, url: str):
     Prompts Gemini to infer the best Schema.org type and relevant properties,
     structured for easy parsing by the application.
     """
-    # Define the example JSON output separately as a RAW string (r"""...""")
-    # and escape literal curly braces by doubling them: {{ and }}
-    # This prevents Python from interpreting them as f-string expressions.
-    example_json_output = r"""
+    # Define the example JSON output using single triple quotes (''')
+    # and use raw string (r) to avoid backslash issues.
+    # This prevents conflict with the """ inside the markdown code block.
+    example_json_output = r'''
 ```json
 {
   "type": "Article",
