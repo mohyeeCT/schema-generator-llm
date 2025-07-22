@@ -16,7 +16,7 @@ from datetime import datetime
 # --- Configuration ---
 # IMPORTANT: For production deployments (e.g., Streamlit Community Cloud),
 # ALWAYS use Streamlit's secrets management for API keys.
-# Learn more here: [https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management](https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management)
+# Learn more here: https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management
 # Example: GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 # For local testing, you can keep it directly or load from an environment variable.
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # Replace with your actual key or st.secrets
@@ -186,23 +186,27 @@ def build_schema_obj_from_inferred(inferred_type: str, inferred_properties: dict
     Constructs a msgspec_schemaorg object based on Gemini's inference,
     with robust type handling and fallbacks.
     """
-    # Initialize properties with core JSON-LD fields and the URL
-    final_properties = {
-        "@context": "[https://schema.org](https://schema.org)",
-        "@type": inferred_type,
-        "url": original_url, # Always include the page URL property
-        "id": inferred_properties.pop("id", original_url) # Use inferred 'id' or default to URL
-    }
-    
+    # Properties that will be passed directly to the SchemaModel constructor
+    model_properties = {}
+
     # Get the appropriate msgspec_schemaorg model from the map.
-    # If the inferred_type is not in our map, default to WebPage.
     SchemaModel = SCHEMA_MODEL_MAP.get(inferred_type)
     if not SchemaModel:
          st.warning(f"Schema.org type '{inferred_type}' is not explicitly supported by the application. Defaulting to WebPage.")
          SchemaModel = WebPage
-         final_properties["@type"] = "WebPage" # Update @type to match fallback model
+         # If falling back, ensure the @type in the final JSON matches the fallback model
+         inferred_type = "WebPage" 
 
-    # Iterate through inferred properties and add them to final_properties,
+    # Add 'url' property as it's common and always present
+    model_properties["url"] = original_url
+    
+    # Use inferred 'id' or default to URL, and add to model_properties if exists
+    # Note: 'id' is a Python keyword, msgspec_schemaorg uses 'id_' or expects it for specific types.
+    # For now, let's keep it simple and ensure the output JSON has an '@id'.
+    # The msgspec_schemaorg models usually don't have an 'id' constructor argument directly.
+    # It's part of the JSON-LD context.
+
+    # Iterate through inferred properties and add them to model_properties,
     # applying type conversions and validations.
     for prop_name, prop_value in inferred_properties.items():
         # Skip properties that are None, empty strings, or placeholders like "N/A"
@@ -214,14 +218,14 @@ def build_schema_obj_from_inferred(inferred_type: str, inferred_properties: dict
             if prop_name in ["datePublished", "dateModified", "startDate", "endDate"]:
                 if isinstance(prop_value, str) and prop_value:
                     # msgspec_schemaorg date fields typically accept datetime objects
-                    final_properties[prop_name] = parse_iso8601(prop_value)
+                    model_properties[prop_name] = parse_iso8601(prop_value)
                 else:
                     st.warning(f"Invalid date format for '{prop_name}': '{prop_value}'. Omitting.")
                     continue
             elif prop_name == "image":
                 # 'image' can be a URL string or an ImageObject. For simplicity, we expect URL here.
                 if isinstance(prop_value, str) and prop_value:
-                    final_properties[prop_name] = prop_value
+                    model_properties[prop_name] = prop_value
                 else:
                     st.warning(f"Invalid image URL format for '{prop_name}': '{prop_value}'. Omitting.")
                     continue
@@ -232,59 +236,73 @@ def build_schema_obj_from_inferred(inferred_type: str, inferred_properties: dict
                         prop_value = prop_value.replace(',', '') # Handle comma as thousands separator
                     
                     if '.' in str(prop_value): # Check if it looks like a float
-                        final_properties[prop_name] = float(prop_value)
+                        model_properties[prop_name] = float(prop_value)
                     else: # Assume int otherwise
-                        final_properties[prop_name] = int(prop_value)
+                        model_properties[prop_name] = int(prop_value)
                 except ValueError:
                     st.warning(f"Invalid number format for '{prop_name}': '{prop_value}'. Omitting.")
                     continue
             # Add more specific type handling for other properties if needed (e.g., duration, geo)
             else:
                 # For all other properties, assume string or direct value is fine
-                final_properties[prop_name] = prop_value
+                model_properties[prop_name] = prop_value
 
         except Exception as e:
             st.warning(f"Failed to process property '{prop_name}' with value '{prop_value}': {e}. Omitting.")
-            # st.exception(e) # Uncomment for detailed property processing errors during development
             continue # Continue to next property if one is problematic
 
     try:
         # Instantiate the Schema.org model with the prepared properties.
         # msgspec_schemaorg models are msgspec.Structs and expect keyword arguments.
-        schema_instance = SchemaModel(**final_properties)
+        schema_instance = SchemaModel(**model_properties)
+        
+        # Manually set @context and @type for serialization purposes, if not handled by msgspec_schemaorg directly
+        # The to_jsonld function should add @context. @type is implicit in the model.
+        # However, if msgspec_schemaorg model doesn't automatically add @context/@type during encoding,
+        # we might need to include it in a custom encoder or wrapper.
+        # For now, let's rely on msgspec.json.encode doing its job for basic @type.
+        
         return schema_instance
     except Exception as e:
         # This catch is for validation errors raised by msgspec_schemaorg itself during instantiation
-        # (e.g., a required field for the model type is missing, or a type is fundamentally wrong)
-        st.error(f"Schema.org model validation failed for '{final_properties.get('@type', 'Unknown')}' type: {e}")
+        st.error(f"Schema.org model validation failed for '{inferred_type}' type with properties {model_properties}: {e}")
         st.warning("Attempting to generate a generic WebPage schema as a fallback due to model validation issues.")
         # Provide a more robust fallback if the specific model fails to instantiate
         return WebPage(
-            name=final_properties.get("name", context.get("title", "Generated WebPage")),
-            description=final_properties.get("description", context.get("description", "")),
-            url=original_url,
-            context="[https://schema.org](https://schema.org)",
-            id=original_url # Always provide an ID for the fallback
+            name=model_properties.get("name", context.get("title", "Generated WebPage")),
+            description=model_properties.get("description", context.get("description", "")),
+            url=original_url # Fallback always includes URL
         )
 
 # --- JSON-LD Serialization Function ---
 def to_jsonld(obj):
     """
     Converts a msgspec_schemaorg object (which is a msgspec.Struct)
-    to a pretty-printed JSON-LD string.
+    to a pretty-printed JSON-LD string, ensuring @context and @type are present.
     """
     try:
         # msgspec.json.encode directly handles msgspec.Struct objects efficiently.
         raw_bytes = msgspec.json.encode(obj)
         
         # Decode the bytes to a UTF-8 string, then load into a standard Python dict
-        # to use json.dumps for pretty-printing (with indent).
         data = json.loads(raw_bytes.decode('utf-8'))
         
-        return json.dumps(data, indent=2, ensure_ascii=False) # ensure_ascii=False allows non-ASCII chars directly
+        # Manually ensure @context and @type are at the top, if not already handled perfectly by msgspec
+        # msgspec_schemaorg models generally output @type correctly.
+        # @context might need explicit addition if not automatically present.
+        if "@context" not in data:
+            data["@context"] = "https://schema.org"
+        
+        # Reorder keys to put @context and @type first for standard JSON-LD appearance
+        ordered_data = {"@context": data.pop("@context")}
+        if "@type" in data: # Ensure @type comes after @context
+            ordered_data["@type"] = data.pop("@type")
+        ordered_data.update(data) # Add remaining properties
+
+        return json.dumps(ordered_data, indent=2, ensure_ascii=False)
     except Exception as e:
         st.error(f"Critical error during final JSON-LD serialization: {e}")
-        st.exception(e) # Display full traceback for severe errors
+        st.exception(e)
         return "Error: Could not generate final JSON-LD output."
 
 # --- Streamlit UI ---
@@ -299,7 +317,7 @@ This tool uses a robust hybrid approach to generate Schema.org JSON-LD markup:
 3.  **Code-Driven Construction & Validation**: Uses Python's `msgspec_schemaorg` library to build the JSON-LD object. This step ensures syntactic correctness, validates data types, and mitigates common "hallucinations" or malformations from the AI's raw output.
 """)
 
-url = st.text_input("Enter a URL", placeholder="e.g., [https://www.example.com/blog-post-about-ai](https://www.example.com/blog-post-about-ai)", key="url_input")
+url = st.text_input("Enter a URL", placeholder="e.g., https://www.example.com/blog-post-about-ai", key="url_input")
 
 if st.button("Generate Schema", key="generate_button"):
     if not url:
@@ -350,9 +368,9 @@ if st.button("Generate Schema", key="generate_button"):
                     "---" # Horizontal rule for separation
                     "**Validation Tools:**"
                     "<ul>"
-                    "<li>🔗 <a href='[https://search.google.com/test/rich-results](https://search.google.com/test/rich-results)' target='_blank'>Google's Rich Results Test</a> "
+                    "<li>🔗 <a href='https://search.google.com/test/rich-results' target='_blank'>Google's Rich Results Test</a> "
                     "(Recommended for checking Google's interpretation and rich result eligibility)</li>"
-                    "<li>🔗 <a href='[https://validator.schema.org/](https://validator.schema.org/)' target='_blank'>Schema Markup Validator</a> "
+                    "<li>🔗 <a href='https://validator.schema.org/' target='_blank'>Schema Markup Validator</a> "
                     "(For general Schema.org compliance and syntax)</li>"
                     "</ul>"
                     , unsafe_allow_html=True
