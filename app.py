@@ -7,7 +7,7 @@ from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
 # — Replace with your actual Gemini API key —
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
+GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"
 genai.configure(api_key=GEMINI_API_KEY)  # :contentReference[oaicite:1]{index=1}
 
 # — Scrape raw page content —
