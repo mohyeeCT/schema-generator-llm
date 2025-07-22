@@ -44,11 +44,11 @@ def build_schema_obj(raw):
     )
 
 def to_jsonld(obj):
-    # 1) Raw encode with msgspec (no indent support) :contentReference[oaicite:3]{index=3}
-    raw = msgspec.json.encode(obj)
-    # 2) Decode and parse :contentReference[oaicite:4]{index=4}
-    data = json.loads(raw.decode())
-    # 3) Pretty-print with indent :contentReference[oaicite:5]{index=5}
+    # 1) Raw encode with msgspec (no indent support)
+    raw_bytes = msgspec.json.encode(obj)
+    # 2) Parse into Python structure
+    data = json.loads(raw_bytes.decode())
+    # 3) Pretty-print with indent
     return json.dumps(data, indent=2)
 
 # Streamlit UI
