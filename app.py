@@ -6,8 +6,8 @@ from msgspec.json import encode
 from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
-# — Insert your Gemini API key here —
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
+# 🚨 Insert your actual Gemini API key here
+GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def fetch_content(url):
@@ -27,7 +27,7 @@ def gemini_suggest_type(context):
         f"- description: {context['description']}\n"
         f"- dates: {context['dates']}\n"
         f"- images: {context['images']}\n\n"
-        "Which @type (Article, Product, Event, etc.) is most appropriate here?"
+        "Which @type (Article, Product, Event, etc.) best fits this page?"
     )
     resp = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -36,7 +36,7 @@ def gemini_suggest_type(context):
     return resp.text.strip()
 
 def build_schema_obj(raw):
-    # Default to Article; you can switch types by parsing gemini suggestion
+    # Currently using Article as default; you can adjust dynamically
     return Article(
         name=raw["title"],
         headline=raw["title"],
@@ -51,8 +51,7 @@ def to_jsonld(obj):
     return encode(obj, indent=2).decode()
 
 # — Streamlit UI —
-
-st.title("📘 Schema.org JSON‑LD Generator (Gemini)")
+st.title("📘 Schema.org JSON-LD Generator (Gemini)")
 url = st.text_input("Enter a URL")
 if st.button("Generate Schema"):
     with st.spinner("Processing..."):
