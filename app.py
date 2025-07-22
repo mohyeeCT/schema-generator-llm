@@ -3,12 +3,16 @@ import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 import json, msgspec.json
-from msgspec_schemaorg.models import Article
+# Import more Schema.org models
+from msgspec_schemaorg.models import Article, WebPage, Product, Event, Organization, Person, Place, CreativeWork, Thing
 from msgspec_schemaorg.utils import parse_iso8601
 from datetime import datetime # Import datetime for type checking
 
 # Configure Gemini API
-GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # Consider using st.secrets for production
+# It's highly recommended to use Streamlit's secrets management for API keys:
+# https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management
+# GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # For direct testing, but use secrets in deployment!
 genai.configure(api_key=GEMINI_API_KEY)
 
 def fetch_content(url):
@@ -51,67 +55,130 @@ def gemini_suggest_type(context):
     model = genai.GenerativeModel("gemini-1.5-flash") # Use a stable model
     try:
         response = model.generate_content(prompt)
-        # Access response.text directly
-        return response.text.strip()
+        # Access response.text directly and clean it
+        suggested_type = response.text.strip()
+        # Basic validation/correction for common Gemini outputs
+        if "Article" in suggested_type: return "Article"
+        if "WebPage" in suggested_type: return "WebPage"
+        if "Product" in suggested_type: return "Product"
+        if "Event" in suggested_type: return "Event"
+        if "Organization" in suggested_type: return "Organization"
+        if "Person" in suggested_type: return "Person"
+        if "Place" in suggested_type: return "Place"
+        # Fallback to a common type if Gemini gives something unexpected
+        return "WebPage"
     except Exception as e:
         st.warning(f"Could not get type suggestion from Gemini: {e}")
-        return "Not Suggested (API Error)"
+        return "WebPage" # Default to WebPage if Gemini fails
 
-def build_schema_obj(raw):
-    """Builds a Schema.org Article object from raw extracted data."""
-    # Ensure date parsing handles potential errors or missing dates gracefully
-    published_date = None
-    if raw["dates"]:
-        try:
-            # parse_iso8601 returns a datetime object
-            published_date = parse_iso8601(raw["dates"][0])
-        except ValueError:
-            st.warning(f"Could not parse date: {raw['dates'][0]}. Skipping datePublished.")
+# Mapping of suggested types to msgspec_schemaorg models and their relevant properties
+SCHEMA_TYPE_MAPPING = {
+    "Article": {
+        "model": Article,
+        "properties": {
+            "name": "title",
+            "headline": "title",
+            "description": "description",
+            "image": lambda r: r["images"][0] if r["images"] else None,
+            "datePublished": lambda r: parse_iso8601(r["dates"][0]) if r["dates"] else None,
+        }
+    },
+    "WebPage": {
+        "model": WebPage,
+        "properties": {
+            "name": "title",
+            "description": "description",
+            "image": lambda r: r["images"][0] if r["images"] else None,
+            # WebPage typically doesn't have a datePublished in the same way an Article does
+            # We can use dateModified if available, or omit.
+            "dateModified": lambda r: parse_iso8601(r["dates"][0]) if r["dates"] else None,
+        }
+    },
+    "Product": {
+        "model": Product,
+        "properties": {
+            "name": "title",
+            "description": "description",
+            "image": lambda r: r["images"][0] if r["images"] else None,
+            # Products might have offers, brand, etc., which are not in raw_data
+            # You'd need more sophisticated scraping for these.
+        }
+    },
+    # Add more mappings as needed
+    # "Event": { "model": Event, "properties": {...} },
+    # "Organization": { "model": Organization, "properties": {...} },
+    # "Person": { "model": Person, "properties": {...} },
+}
 
-    return Article(
-        name=raw["title"],
-        headline=raw["title"],
-        description=raw["description"] or None,
-        image=raw["images"][0] if raw["images"] else None,
-        datePublished=published_date, # Pass datetime object directly
-        id=None, # You might want to generate a canonical URL here if applicable
-    )
+def build_schema_obj(raw: dict, suggested_type: str):
+    """
+    Builds a Schema.org object based on the suggested_type and raw extracted data.
+    """
+    model_info = SCHEMA_TYPE_MAPPING.get(suggested_type)
+    if not model_info:
+        st.warning(f"Unsupported Schema.org type '{suggested_type}'. Defaulting to WebPage.")
+        model_info = SCHEMA_TYPE_MAPPING["WebPage"] # Fallback if suggestion is not mapped
 
-def to_jsonld(obj: Article):
+    SchemaModel = model_info["model"]
+    properties = {}
+    for schema_prop, raw_key_or_func in model_info["properties"].items():
+        if callable(raw_key_or_func):
+            value = raw_key_or_func(raw)
+        else:
+            value = raw.get(raw_key_or_func)
+
+        # Handle datetime conversion for date properties within the mapping
+        if isinstance(value, datetime):
+            value = value.isoformat()
+
+        if value is not None:
+            properties[schema_prop] = value
+
+    # Add common properties that might apply to most types
+    properties["@context"] = "https://schema.org"
+    properties["@type"] = suggested_type # Ensure the @type matches the chosen model
+    properties["id"] = None # Still keeping this as None unless you have a specific URI
+
+    try:
+        # Create an instance of the chosen Schema.org model
+        # Using **properties to unpack the dictionary into arguments
+        schema_instance = SchemaModel(**properties)
+        return schema_instance
+    except Exception as e:
+        st.error(f"Error creating Schema.org object for {suggested_type}: {e}")
+        # Fallback to a generic WebPage if the specific model creation fails
+        st.warning("Attempting to generate a generic WebPage schema instead.")
+        return WebPage(
+            name=raw["title"],
+            description=raw["description"],
+            image=raw["images"][0] if raw["images"] else None,
+            context="https://schema.org"
+        )
+
+
+def to_jsonld(obj):
     """Converts a msgspec_schemaorg object to a pretty-printed JSON-LD string."""
     try:
-        # Manually construct a dictionary from the Article object
-        # This gives us fine-grained control over serialization, especially for datetime
-        data_to_serialize = {
-            "@context": "https://schema.org", # Explicitly set context
-            "@type": "Article", # Explicitly set type for clarity, though it might be inferred by msgspec_schemaorg
-            "name": obj.name,
-            "headline": obj.headline,
-            "description": obj.description,
-            "image": obj.image,
-            # Convert datetime object to ISO 8601 string
-            "datePublished": obj.datePublished.isoformat() if isinstance(obj.datePublished, datetime) else obj.datePublished,
-            # 'id' is often a URI, if you want it to be part of the JSON-LD, include it.
-            # Assuming obj.id is None or a string/URI.
-            "identifier": obj.id if obj.id else None # Use 'identifier' for id if it's a URI, or just omit if None
-        }
+        # Since we are now building the dict directly in build_schema_obj,
+        # we can ensure that the object 'obj' is already a msgspec.Struct instance
+        # that *should* be directly encodable by msgspec.json.encode().
+        # If it's a manually constructed dict from build_schema_obj fallback,
+        # msgspec.json.encode handles it too.
 
-        # Remove keys with None values to keep the JSON-LD clean
-        data_to_serialize = {k: v for k, v in data_to_serialize.items() if v is not None}
+        # The previous error "Encoding objects of type NavigableString is unsupported"
+        # was fixed in fetch_content.
+        # The previous error "'Article' object has no attribute 'dict'" was due to my bad suggestion.
+        # Now, `obj` should be a clean msgspec_schemaorg model instance.
+        raw_bytes = msgspec.json.encode(obj)
 
-        # 1) Raw encode the dictionary with msgspec
-        # msgspec is highly optimized for encoding dictionaries
-        raw_bytes = msgspec.json.encode(data_to_serialize)
-
-        # 2) Decode to string and then load into Python dict for pretty printing
-        # This step is mainly for pretty-printing, as msgspec.json.encode
-        # directly gives you the compact JSON byte string.
+        # Decode to string and then load into Python dict for pretty printing
         data = json.loads(raw_bytes.decode('utf-8'))
 
-        # 3) Pretty-print with indent
+        # Pretty-print with indent
         return json.dumps(data, indent=2)
     except Exception as e:
         st.error(f"Error converting object to JSON-LD: {e}")
+        st.exception(e) # Display full traceback for debugging
         return "Error: Could not generate JSON-LD"
 
 
@@ -128,9 +195,14 @@ if st.button("Generate Schema"):
         with st.spinner("Processing... This might take a moment."):
             raw_data = fetch_content(url)
 
-            if raw_data["title"] or raw_data["description"]: # Only proceed if some content was successfully fetched
+            # Check if any content was actually extracted before proceeding
+            if not any(raw_data.values()): # If all values are empty or default
+                st.error("Could not fetch any meaningful content from the provided URL. Please check the URL and try again.")
+                st.info("Ensure the URL is publicly accessible and contains standard HTML with title/description/image tags.")
+            else:
                 suggested_type = gemini_suggest_type(raw_data)
-                schema_obj = build_schema_obj(raw_data)
+                # Pass the suggested_type to the builder
+                schema_obj = build_schema_obj(raw_data, suggested_type)
                 jsonld = to_jsonld(schema_obj)
 
                 st.subheader("💡 Gemini Suggests")
@@ -152,8 +224,6 @@ if st.button("Generate Schema"):
                     "(For general Schema.org compliance)"
                     , unsafe_allow_html=True
                 )
-            else:
-                st.error("Could not fetch meaningful content from the provided URL. Please check the URL and try again.")
 
 st.markdown(
     """
