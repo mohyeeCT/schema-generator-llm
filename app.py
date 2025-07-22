@@ -17,12 +17,17 @@ def fetch_content(url):
         r = requests.get(url, timeout=10)
         r.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
         soup = BeautifulSoup(r.text, "html.parser")
-        title = soup.title.string if soup.title else ""
-        desc = (soup.find("meta", {"name": "description"}) or {}).get("content", "")
+
+        # Explicitly convert to str() to avoid NavigableString issues
+        title = str(soup.title.string) if soup.title else ""
+        desc_tag = soup.find("meta", {"name": "description"})
+        desc = str(desc_tag.get("content", "")) if desc_tag else ""
+
         # Get all datetime attributes from <time> tags
         dates = [t.get("datetime") for t in soup.find_all("time", datetime=True) if t.get("datetime")]
-        # Get up to 5 image src attributes
-        images = [img["src"] for img in soup.find_all("img", src=True)][:5]
+        # Get up to 5 image src attributes, also ensure they are strings
+        images = [str(img["src"]) for img in soup.find_all("img", src=True)][:5]
+        
         return {"title": title, "description": desc, "dates": dates, "images": images}
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching content from URL: {e}")
@@ -69,9 +74,6 @@ def build_schema_obj(raw):
         description=raw["description"] or None,
         image=raw["images"][0] if raw["images"] else None,
         datePublished=published_date, # Pass datetime object directly
-        # For @id and @context, these are usually defined by the library or can be explicitly set.
-        # msgspec_schemaorg handles @context automatically if you import from models.
-        # id should be a URL or a unique identifier for the entity
         id=None, # You might want to generate a canonical URL here if applicable
     )
 
