@@ -7,66 +7,136 @@ from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
 # Configure Gemini API
-GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"
+GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # Consider using st.secrets for production
 genai.configure(api_key=GEMINI_API_KEY)
 
 def fetch_content(url):
-    r = requests.get(url, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
-    title = soup.title.string if soup.title else ""
-    desc = (soup.find("meta", {"name": "description"}) or {}).get("content", "")
-    dates = [t.get("datetime") for t in soup.find_all("time", datetime=True)]
-    images = [img["src"] for img in soup.find_all("img", src=True)][:5]
-    return {"title": title, "description": desc, "dates": dates, "images": images}
+    """Fetches content from a URL and extracts title, description, dates, and images."""
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        soup = BeautifulSoup(r.text, "html.parser")
+        title = soup.title.string if soup.title else ""
+        desc = (soup.find("meta", {"name": "description"}) or {}).get("content", "")
+        # Get all datetime attributes from <time> tags
+        dates = [t.get("datetime") for t in soup.find_all("time", datetime=True) if t.get("datetime")]
+        # Get up to 5 image src attributes
+        images = [img["src"] for img in soup.find_all("img", src=True)][:5]
+        return {"title": title, "description": desc, "dates": dates, "images": images}
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching content from URL: {e}")
+        return {"title": "", "description": "", "dates": [], "images": []}
+    except Exception as e:
+        st.error(f"An unexpected error occurred during content fetching: {e}")
+        return {"title": "", "description": "", "dates": [], "images": []}
 
 def gemini_suggest_type(context):
+    """Uses Gemini to suggest the best Schema.org type for the page content."""
     prompt = (
-        "You are a Schema.org expert. Page data:\n"
+        "You are a Schema.org expert. Based on the following page data, "
+        "which single Schema.org @type (e.g., Article, Product, Event, WebPage) "
+        "best fits this page? Just respond with the @type name, nothing else. "
+        "If it's ambiguous, pick the most general relevant type.\n\n"
         f"- title: {context['title']}\n"
         f"- description: {context['description']}\n"
-        f"- dates: {context['dates']}\n"
-        f"- images: {context['images']}\n\n"
-        "Which Schema.org @type (Article, Product, Event, etc.) best fits this page?"
+        f"- dates: {', '.join(context['dates']) if context['dates'] else 'None'}\n"
+        f"- images: {', '.join(context['images']) if context['images'] else 'None'}\n\n"
     )
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
-    response = model.generate_content(prompt)
-    return response.text.strip()
+    model = genai.GenerativeModel("gemini-1.5-flash") # Use a stable model
+    try:
+        response = model.generate_content(prompt)
+        # Access response.text directly
+        return response.text.strip()
+    except Exception as e:
+        st.warning(f"Could not get type suggestion from Gemini: {e}")
+        return "Not Suggested (API Error)"
 
 def build_schema_obj(raw):
+    """Builds a Schema.org Article object from raw extracted data."""
+    # Ensure date parsing handles potential errors or missing dates gracefully
+    published_date = None
+    if raw["dates"]:
+        try:
+            # parse_iso8601 returns a datetime object
+            published_date = parse_iso8601(raw["dates"][0])
+        except ValueError:
+            st.warning(f"Could not parse date: {raw['dates'][0]}. Skipping datePublished.")
+
     return Article(
         name=raw["title"],
         headline=raw["title"],
         description=raw["description"] or None,
         image=raw["images"][0] if raw["images"] else None,
-        datePublished=parse_iso8601(raw["dates"][0]) if raw["dates"] else None,
-        id=None,
-        context="https://schema.org"
+        datePublished=published_date, # Pass datetime object directly
+        # For @id and @context, these are usually defined by the library or can be explicitly set.
+        # msgspec_schemaorg handles @context automatically if you import from models.
+        # id should be a URL or a unique identifier for the entity
+        id=None, # You might want to generate a canonical URL here if applicable
     )
 
 def to_jsonld(obj):
-    # 1) Raw encode with msgspec (no indent support)
-    raw_bytes = msgspec.json.encode(obj)
-    # 2) Parse into Python structure
-    data = json.loads(raw_bytes.decode())
-    # 3) Pretty-print with indent
-    return json.dumps(data, indent=2)
+    """Converts a msgspec_schemaorg object to a pretty-printed JSON-LD string."""
+    try:
+        # Convert the msgspec_schemaorg object to a dictionary first.
+        # msgspec_schemaorg models typically have a .dict() method for this.
+        data_dict = obj.dict()
+
+        # 1) Raw encode the dictionary with msgspec
+        raw_bytes = msgspec.json.encode(data_dict)
+
+        # 2) Decode to string and then load into Python dict for pretty printing
+        data = json.loads(raw_bytes.decode('utf-8'))
+
+        # 3) Pretty-print with indent
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        st.error(f"Error converting object to JSON-LD: {e}")
+        return "Error: Could not generate JSON-LD"
+
 
 # Streamlit UI
 st.title("📘 Schema.org JSON‑LD Generator (Gemini)")
-url = st.text_input("Enter a URL")
-if st.button("Generate Schema"):
-    with st.spinner("Processing..."):
-        raw_data = fetch_content(url)
-        suggested_type = gemini_suggest_type(raw_data)
-        schema_obj = build_schema_obj(raw_data)
-        jsonld = to_jsonld(schema_obj)
+st.markdown("Enter a URL to generate Schema.org JSON-LD markup and get a Schema.org type suggestion from Gemini.")
 
-    st.subheader("💡 Gemini Suggests")
-    st.write(suggested_type)
-    st.subheader("✅ JSON‑LD Output")
-    st.code(jsonld, language="json")
-    st.download_button("📥 Download JSON‑LD", jsonld, file_name="schema.jsonld")
-    st.markdown(
-        "[🔗 Validate with Schema Markup Validator](https://validator.schema.org)",
-        unsafe_allow_html=True
-    )
+url = st.text_input("Enter a URL", placeholder="e.g., https://www.example.com/article")
+
+if st.button("Generate Schema"):
+    if not url:
+        st.warning("Please enter a URL to proceed.")
+    else:
+        with st.spinner("Processing... This might take a moment."):
+            raw_data = fetch_content(url)
+
+            if raw_data["title"]: # Only proceed if content was successfully fetched
+                suggested_type = gemini_suggest_type(raw_data)
+                schema_obj = build_schema_obj(raw_data)
+                jsonld = to_jsonld(schema_obj)
+
+                st.subheader("💡 Gemini Suggests")
+                st.write(f"The suggested Schema.org type is: **`{suggested_type}`**")
+
+                st.subheader("✅ JSON‑LD Output")
+                st.code(jsonld, language="json")
+
+                # Only offer download if JSON-LD was successfully generated
+                if "Error" not in jsonld:
+                    st.download_button("📥 Download JSON‑LD", jsonld, file_name="schema.jsonld", mime="application/ld+json")
+
+                st.markdown(
+                    "---" # Horizontal rule for separation
+                    "🔗 **[Validate with Google's Rich Results Test](https://search.google.com/test/rich-results)** "
+                    "(Recommended for checking Google's interpretation)"
+                    "<br>"
+                    "🔗 **[Validate with Schema Markup Validator](https://validator.schema.org)** "
+                    "(For general Schema.org compliance)"
+                    , unsafe_allow_html=True
+                )
+            else:
+                st.error("Could not fetch content from the provided URL. Please check the URL and try again.")
+
+st.markdown(
+    """
+    ---
+    This tool uses Gemini to suggest Schema.org types and `msgspec_schemaorg` to build the JSON-LD.
+    """
+)
