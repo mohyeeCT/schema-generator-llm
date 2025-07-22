@@ -64,7 +64,7 @@ def gemini_infer_schema_details(context: dict, url: str):
     structured for easy parsing by the application.
     """
     # Define the example JSON output as a raw string containing ONLY the JSON.
-    # The markdown code block delimiters (```json) will be added in the main 'prompt' f-string.
+    # This string will be inserted into the main prompt.
     example_json_content = """{
   "type": "Article",
   "properties": {
@@ -75,9 +75,11 @@ def gemini_infer_schema_details(context: dict, url: str):
     "datePublished": "<First Date/Time>",
     "url": "<Original Page URL>"
   }
-}""" # No surrounding backticks here. Just the raw JSON string.
+}"""
 
-    prompt = f"""
+    # Define the prompt using a regular triple-quoted string and use .format()
+    # to insert variables. This avoids f-string parsing issues with nested structures.
+    prompt_template = """
 You are an expert in Schema.org JSON-LD markup.
 Based on the following web page content and URL, your task is to identify the single most appropriate primary Schema.org `@type` (e.g., WebPage, Article, Product, Event, LocalBusiness, Organization, Person, Recipe).
 Then, list the most relevant Schema.org properties for that specific `@type`, along with the corresponding data extracted directly from the provided page context.
@@ -92,12 +94,12 @@ Then, list the most relevant Schema.org properties for that specific `@type`, al
 * Do NOT include any additional text, explanations, or markdown outside the single JSON code block.
 
 **Provided Page Content:**
-Page Title: {context['title']}
-Page Description: {context['description']}
-First available date/time (if any): {context['dates'][0] if context['dates'] else 'N/A'}
-First 5 image URLs: {', '.join(context['images']) if context['images'] else 'N/A'}
-Original Page URL: {url}
+Page Title: {page_title}
+Page Description: {page_description}
+First available date/time (if any): {first_date}
+First 5 image URLs: {image_urls}
+Original Page URL: {original_url}
 
 Example of expected JSON output:
 ```json
-{example_json_content}
+{json_example}
