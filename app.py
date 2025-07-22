@@ -5,6 +5,7 @@ import google.generativeai as genai
 import json, msgspec.json
 from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
+from datetime import datetime # Import datetime for type checking
 
 # Configure Gemini API
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # Consider using st.secrets for production
@@ -74,17 +75,35 @@ def build_schema_obj(raw):
         id=None, # You might want to generate a canonical URL here if applicable
     )
 
-def to_jsonld(obj):
+def to_jsonld(obj: Article):
     """Converts a msgspec_schemaorg object to a pretty-printed JSON-LD string."""
     try:
-        # Convert the msgspec_schemaorg object to a dictionary first.
-        # msgspec_schemaorg models typically have a .dict() method for this.
-        data_dict = obj.dict()
+        # Manually construct a dictionary from the Article object
+        # This gives us fine-grained control over serialization, especially for datetime
+        data_to_serialize = {
+            "@context": "https://schema.org", # Explicitly set context
+            "@type": "Article", # Explicitly set type for clarity, though it might be inferred by msgspec_schemaorg
+            "name": obj.name,
+            "headline": obj.headline,
+            "description": obj.description,
+            "image": obj.image,
+            # Convert datetime object to ISO 8601 string
+            "datePublished": obj.datePublished.isoformat() if isinstance(obj.datePublished, datetime) else obj.datePublished,
+            # 'id' is often a URI, if you want it to be part of the JSON-LD, include it.
+            # Assuming obj.id is None or a string/URI.
+            "identifier": obj.id if obj.id else None # Use 'identifier' for id if it's a URI, or just omit if None
+        }
+
+        # Remove keys with None values to keep the JSON-LD clean
+        data_to_serialize = {k: v for k, v in data_to_serialize.items() if v is not None}
 
         # 1) Raw encode the dictionary with msgspec
-        raw_bytes = msgspec.json.encode(data_dict)
+        # msgspec is highly optimized for encoding dictionaries
+        raw_bytes = msgspec.json.encode(data_to_serialize)
 
         # 2) Decode to string and then load into Python dict for pretty printing
+        # This step is mainly for pretty-printing, as msgspec.json.encode
+        # directly gives you the compact JSON byte string.
         data = json.loads(raw_bytes.decode('utf-8'))
 
         # 3) Pretty-print with indent
@@ -107,7 +126,7 @@ if st.button("Generate Schema"):
         with st.spinner("Processing... This might take a moment."):
             raw_data = fetch_content(url)
 
-            if raw_data["title"]: # Only proceed if content was successfully fetched
+            if raw_data["title"] or raw_data["description"]: # Only proceed if some content was successfully fetched
                 suggested_type = gemini_suggest_type(raw_data)
                 schema_obj = build_schema_obj(raw_data)
                 jsonld = to_jsonld(schema_obj)
@@ -132,11 +151,11 @@ if st.button("Generate Schema"):
                     , unsafe_allow_html=True
                 )
             else:
-                st.error("Could not fetch content from the provided URL. Please check the URL and try again.")
+                st.error("Could not fetch meaningful content from the provided URL. Please check the URL and try again.")
 
 st.markdown(
     """
     ---
-    This tool uses Gemini to suggest Schema.org types and `msgspec_schemaorg` to build the JSON-LD.
+    This tool uses Gemini to suggest Schema.org types and `msgspec_schemaorg` to help structure the JSON-LD.
     """
 )
