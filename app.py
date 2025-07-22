@@ -16,7 +16,7 @@ from datetime import datetime
 # --- Configuration ---
 # IMPORTANT: For production deployments (e.g., Streamlit Community Cloud),
 # ALWAYS use Streamlit's secrets management for API keys.
-# Learn more here: https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management
+# Learn more here: [https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management](https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management)
 # Example: GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 # For local testing, you can keep it directly or load from an environment variable.
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U" # Replace with your actual key or st.secrets
@@ -63,18 +63,19 @@ def gemini_infer_schema_details(context: dict, url: str):
     Prompts Gemini to infer the best Schema.org type and relevant properties,
     structured for easy parsing by the application.
     """
-    # Define the example JSON output separately to avoid f-string parsing issues
-    # Variables within this string will be correctly interpolated by the outer f-string
-    example_json_output = f"""
+    # Define the example JSON output separately as a RAW string (r"""...""")
+    # and escape literal curly braces by doubling them: {{ and }}
+    # This prevents Python from interpreting them as f-string expressions.
+    example_json_output = r"""
 ```json
-{{
+{
   "type": "Article",
-  "properties": {{
-    "name": "{context['title']}",
-    "headline": "{context['title']}",
-    "description": "{context['description']}",
-    "image": "{context['images'][0] if context['images'] else ''}",
-    "datePublished": "{context['dates'][0] if context['dates'] else ''}",
-    "url": "{url}"
-  }}
-}}
+  "properties": {
+    "name": "<Page Title>",
+    "headline": "<Page Title>",
+    "description": "<Page Description>",
+    "image": "<First Image URL>",
+    "datePublished": "<First Date/Time>",
+    "url": "<Original Page URL>"
+  }
+}
