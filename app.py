@@ -1,69 +1,68 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from openai import OpenAI
-import msgspec.json
+import google.generativeai as genai
+from msgspec.json import encode
 from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
-# --- config ---
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+# — Replace with your actual Gemini API key —
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
+genai.configure(api_key=GEMINI_API_KEY)  # :contentReference[oaicite:1]{index=1}
 
-# --- functions ---
+# — Scrape raw page content —
 def fetch_content(url):
     r = requests.get(url, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
     title = soup.title.string if soup.title else ""
-    desc_tag = soup.find("meta", attrs={"name": "description"})
-    desc = desc_tag["content"] if desc_tag else ""
-    dates = [time["datetime"] for time in soup.find_all("time", datetime=True)]
+    desc = soup.find("meta", {"name": "description"})["content"] if soup.find("meta", {"name": "description"}) else ""
+    dates = [t["datetime"] for t in soup.find_all("time", datetime=True)]
     images = [img["src"] for img in soup.find_all("img", src=True)][:5]
     return {"title": title, "description": desc, "dates": dates, "images": images}
 
-def call_llm(content):
-    client = OpenAI(api_key=OPENAI_API_KEY)
+# — Ask Gemini for schema type and content —
+def gemini_generate_schema(context):
     prompt = (
-        "You are a Schema.org expert. Given page data:\n"
-        f"title: {content['title']}\n"
-        f"description: {content['description']}\n"
-        f"dates: {content['dates']}\n"
-        f"images: {content['images']}\n"
-        "Choose @type (e.g., Article) and output JSON with fields matching msgspec_schemaorg Article model:"
+        "You are a Schema.org expert. Page data:\n"
+        f"- title: {context['title']}\n"
+        f"- description: {context['description']}\n"
+        f"- dates: {context['dates']}\n"
+        f"- images: {context['images']}\n\n"
+        "Pick the best @type (e.g., Article) and list fields needed in JSON, "
+        "but do NOT output full JSON-LD—just tell me the main type to build."
     )
-    resp = client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "system", "content": "You are schema.org expert."},
-                  {"role": "user", "content": prompt}],
-        temperature=0,
-        format="json"
-    )
-    return resp.choices[0].message.content
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    resp = model.generate_content(prompt=prompt)
+    return resp.text
 
-def build_schema_llm(raw):
-    j = call_llm(raw)
-    obj = Article(
+def build_schema_obj(raw):
+    # Default to Article; improve later by parsing Gemini's answer
+    return Article(
         name=raw["title"],
         headline=raw["title"],
-        description=raw["description"],
+        description=raw["description"] or None,
         image=raw["images"][0] if raw["images"] else None,
         datePublished=parse_iso8601(raw["dates"][0]) if raw["dates"] else None,
         id=None,
         context="https://schema.org"
     )
-    return msgspec.json.decode(msgspec.json.encode(obj), type=Article)
 
 def to_jsonld(obj):
-    return msgspec.json.encode(obj, indent=2).decode()
+    return encode(obj, indent=2).decode()
 
-# --- UI ---
-st.title("Schema.org JSON‑LD Generator")
-url = st.text_input("Enter a URL")
+# — Streamlit UI —
+st.title("💡 Schema Generator via Gemini")
+url = st.text_input("Enter a URL to analyze")
 if st.button("Generate Schema"):
-    with st.spinner("Analyzing..."):
+    with st.spinner("Fetching & analyzing..."):
         raw = fetch_content(url)
-        schema_obj = build_schema_llm(raw)
+        gemini_suggestion = gemini_generate_schema(raw)
+        schema_obj = build_schema_obj(raw)
         jsonld = to_jsonld(schema_obj)
+
+    st.subheader("🧠 Gemini Suggestion")
+    st.write(gemini_suggestion)
     st.subheader("Generated JSON‑LD")
     st.code(jsonld, language="json")
     st.download_button("Download JSON‑LD", jsonld, file_name="schema.jsonld")
-    st.markdown("[Validate using Schema Markup Validator](https://validator.schema.org)", unsafe_allow_html=True)
+    st.markdown("[Validate in Schema Markup Validator](https://validator.schema.org)", unsafe_allow_html=True)
