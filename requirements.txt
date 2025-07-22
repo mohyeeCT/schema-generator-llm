@@ -4,3 +4,10 @@ beautifulsoup4
 google-generativeai
 msgspec-schemaorg
 msgspec
+streamlit
+requests
+beautifulsoup4
+google-genai
+msgspec-schemaorg
+msgspec
+pyld
