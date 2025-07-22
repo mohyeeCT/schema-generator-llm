@@ -6,11 +6,9 @@ from msgspec.json import encode
 from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
-# 🚨 Replace with your actual Gemini API key
+# Configure Gemini API
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"
 genai.configure(api_key=GEMINI_API_KEY)
-
-client = genai.Client()
 
 def fetch_content(url):
     r = requests.get(url, timeout=10)
@@ -30,11 +28,10 @@ def gemini_suggest_type(context):
         f"- images: {context['images']}\n\n"
         "Which Schema.org @type (Article, Product, Event, etc.) best fits this page?"
     )
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-    return resp.text.strip()
+    
+    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
 def build_schema_obj(raw):
     return Article(
@@ -50,7 +47,7 @@ def build_schema_obj(raw):
 def to_jsonld(obj):
     return encode(obj, indent=2).decode()
 
-# — Streamlit UI —
+# Streamlit UI
 st.title("📘 Schema.org JSON‑LD Generator (Gemini)")
 url = st.text_input("Enter a URL")
 if st.button("Generate Schema"):
