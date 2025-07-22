@@ -63,13 +63,9 @@ def gemini_infer_schema_details(context: dict, url: str):
     Prompts Gemini to infer the best Schema.org type and relevant properties,
     structured for easy parsing by the application.
     """
-    # Define the example JSON output using standard triple double quotes (""").
-    # If the *content* itself contained literal """ sequences, they would need to be escaped as \"\"\".
-    # However, since the internal markdown block uses ` `` ` (backticks) and not quotes,
-    # this should now be safe.
-    example_json_output = """
-```json
-{
+    # Define the example JSON output as a raw string containing ONLY the JSON.
+    # The markdown code block delimiters (```json) will be added in the main 'prompt' f-string.
+    example_json_content = """{
   "type": "Article",
   "properties": {
     "name": "<Page Title>",
@@ -79,4 +75,29 @@ def gemini_infer_schema_details(context: dict, url: str):
     "datePublished": "<First Date/Time>",
     "url": "<Original Page URL>"
   }
-}
+}""" # No surrounding backticks here. Just the raw JSON string.
+
+    prompt = f"""
+You are an expert in Schema.org JSON-LD markup.
+Based on the following web page content and URL, your task is to identify the single most appropriate primary Schema.org `@type` (e.g., WebPage, Article, Product, Event, LocalBusiness, Organization, Person, Recipe).
+Then, list the most relevant Schema.org properties for that specific `@type`, along with the corresponding data extracted directly from the provided page context.
+
+**Output Format:**
+* Strictly output a single JSON object.
+* The top-level object must have two keys:
+    * `"type"`: A string representing the chosen Schema.org `@type` (e.g., "WebPage", "Article").
+    * `"properties"`: A JSON object (dictionary) where keys are standard Schema.org property names (in camelCase, e.g., "name", "headline", "description", "image", "datePublished", "url", "price", "brand"). Values should be the extracted data.
+* If a property value is not available, is "N/A", or is an empty string, **omit that property entirely** from the "properties" dictionary.
+* Ensure the `"url"` property within the `"properties"` dictionary is always populated with the `Original Page URL`.
+* Do NOT include any additional text, explanations, or markdown outside the single JSON code block.
+
+**Provided Page Content:**
+Page Title: {context['title']}
+Page Description: {context['description']}
+First available date/time (if any): {context['dates'][0] if context['dates'] else 'N/A'}
+First 5 image URLs: {', '.join(context['images']) if context['images'] else 'N/A'}
+Original Page URL: {url}
+
+Example of expected JSON output:
+```json
+{example_json_content}
