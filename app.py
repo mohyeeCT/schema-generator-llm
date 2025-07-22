@@ -1,14 +1,14 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from google import genai
+import google.generativeai as genai
 from msgspec.json import encode
 from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
 # 🚨 Replace with your actual Gemini API key
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"
-genai.configure(api_key=GEMINI_API_KEY)  # Picks up API key directly :contentReference[oaicite:1]{index=1}
+genai.configure(api_key=GEMINI_API_KEY)
 
 client = genai.Client()
 
