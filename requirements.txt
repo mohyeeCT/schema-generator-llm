@@ -11,3 +11,10 @@ google-genai
 msgspec-schemaorg
 msgspec
 pyld
+streamlit
+requests
+beautifulsoup4
+google-genai
+msgspec-schemaorg
+msgspec
+pyld
