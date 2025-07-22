@@ -63,10 +63,12 @@ def gemini_infer_schema_details(context: dict, url: str):
     Prompts Gemini to infer the best Schema.org type and relevant properties,
     structured for easy parsing by the application.
     """
-    # Define the example JSON output using SINGLE triple quotes (''')
-    # AND use 4 backticks for the markdown code block to avoid conflict with Python's triple quotes.
-    example_json_output = r'''
-````json
+    # Define the example JSON output using standard triple double quotes (""").
+    # If the *content* itself contained literal """ sequences, they would need to be escaped as \"\"\".
+    # However, since the internal markdown block uses ` `` ` (backticks) and not quotes,
+    # this should now be safe.
+    example_json_output = """
+```json
 {
   "type": "Article",
   "properties": {
