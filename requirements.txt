@@ -1,7 +1,8 @@
 streamlit
 requests
 beautifulsoup4
-openai
+google-generativeai
 msgspec-schemaorg
 msgspec
+msgspec-jsonschema
 pyld
