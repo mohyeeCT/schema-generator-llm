@@ -6,16 +6,17 @@ from msgspec.json import encode
 from msgspec_schemaorg.models import Article
 from msgspec_schemaorg.utils import parse_iso8601
 
-# 🚨 Insert your actual Gemini API key here
+# 🚨 Replace with your actual Gemini API key
 GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"
-client = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)  # Picks up API key directly :contentReference[oaicite:1]{index=1}
+
+client = genai.Client()
 
 def fetch_content(url):
     r = requests.get(url, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
     title = soup.title.string if soup.title else ""
-    desc_tag = soup.find("meta", attrs={"name": "description"})
-    desc = desc_tag["content"] if desc_tag else ""
+    desc = (soup.find("meta", {"name": "description"}) or {}).get("content", "")
     dates = [t.get("datetime") for t in soup.find_all("time", datetime=True)]
     images = [img["src"] for img in soup.find_all("img", src=True)][:5]
     return {"title": title, "description": desc, "dates": dates, "images": images}
@@ -27,7 +28,7 @@ def gemini_suggest_type(context):
         f"- description: {context['description']}\n"
         f"- dates: {context['dates']}\n"
         f"- images: {context['images']}\n\n"
-        "Which @type (Article, Product, Event, etc.) best fits this page?"
+        "Which Schema.org @type (Article, Product, Event, etc.) best fits this page?"
     )
     resp = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -36,7 +37,6 @@ def gemini_suggest_type(context):
     return resp.text.strip()
 
 def build_schema_obj(raw):
-    # Currently using Article as default; you can adjust dynamically
     return Article(
         name=raw["title"],
         headline=raw["title"],
@@ -51,7 +51,7 @@ def to_jsonld(obj):
     return encode(obj, indent=2).decode()
 
 # — Streamlit UI —
-st.title("📘 Schema.org JSON-LD Generator (Gemini)")
+st.title("📘 Schema.org JSON‑LD Generator (Gemini)")
 url = st.text_input("Enter a URL")
 if st.button("Generate Schema"):
     with st.spinner("Processing..."):
