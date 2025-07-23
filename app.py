@@ -9,30 +9,218 @@ from urllib.parse import urljoin, urlparse
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-# Import all relevant Schema.org models you might expect Gemini to suggest
+# Import all relevant Schema.org models
 from msgspec_schemaorg.models import (
     Article, WebPage, Product, Event, Organization, Person, Place,
     CreativeWork, Thing, LocalBusiness, Service, Recipe, Review,
-    ImageObject, VideoObject, NewsArticle, BlogPosting
+    ImageObject, VideoObject, NewsArticle, BlogPosting, ContactPoint,
+    PostalAddress
 )
 from msgspec_schemaorg.utils import parse_iso8601
 
 # --- Configuration ---
-# IMPORTANT: For production deployments (e.g., Streamlit Community Cloud),
-# ALWAYS use Streamlit's secrets management for API keys.
-# Learn more here: https://docs.streamlit.io/deploy/streamlit-cloud/secrets-management
-# Example: GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-# For local testing, you can keep it directly or load from an environment variable.
-GEMINI_API_KEY = "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U"  # Replace with your actual key or st.secrets
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyDwxh1DQStRDUra_Nu9KUkxDVrSNb7p42U")
 genai.configure(api_key=GEMINI_API_KEY)
+
+# --- Custom Schema Templates ---
+CUSTOM_TEMPLATES = {
+    "Organization": {
+        "template": {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": "",
+            "url": "",
+            "logo": "",
+            "description": "",
+            "image": "",
+            "contactPoint": [],
+            "sameAs": [],
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "",
+                "addressLocality": "",
+                "addressRegion": "",
+                "postalCode": "",
+                "addressCountry": ""
+            },
+            "keywords": [],
+            "telephone": "",
+            "email": ""
+        },
+        "description": "Comprehensive organization schema with contact points, social media, and address"
+    },
+    "LocalBusiness": {
+        "template": {
+            "@context": "https://schema.org",
+            "@type": "LocalBusiness",
+            "name": "",
+            "url": "",
+            "image": "",
+            "description": "",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "",
+                "addressLocality": "",
+                "addressRegion": "",
+                "postalCode": "",
+                "addressCountry": ""
+            },
+            "geo": {
+                "@type": "GeoCoordinates",
+                "latitude": "",
+                "longitude": ""
+            },
+            "telephone": "",
+            "email": "",
+            "openingHours": [],
+            "priceRange": "",
+            "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": "",
+                "reviewCount": ""
+            }
+        },
+        "description": "Local business with location, hours, and ratings"
+    },
+    "Article": {
+        "template": {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": "",
+            "description": "",
+            "image": "",
+            "author": {
+                "@type": "Person",
+                "name": ""
+            },
+            "publisher": {
+                "@type": "Organization",
+                "name": "",
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": ""
+                }
+            },
+            "datePublished": "",
+            "dateModified": "",
+            "url": "",
+            "articleSection": "",
+            "wordCount": "",
+            "keywords": []
+        },
+        "description": "Comprehensive article schema with author and publisher details"
+    },
+    "Product": {
+        "template": {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "",
+            "description": "",
+            "image": [],
+            "brand": {
+                "@type": "Brand",
+                "name": ""
+            },
+            "manufacturer": {
+                "@type": "Organization",
+                "name": ""
+            },
+            "offers": {
+                "@type": "Offer",
+                "priceCurrency": "",
+                "price": "",
+                "availability": "",
+                "seller": {
+                    "@type": "Organization",
+                    "name": ""
+                }
+            },
+            "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": "",
+                "reviewCount": ""
+            },
+            "sku": "",
+            "mpn": ""
+        },
+        "description": "Product schema with pricing, ratings, and manufacturer details"
+    }
+}
 
 # --- Enhanced Content Extraction Functions ---
 
+def extract_existing_schema(soup: BeautifulSoup) -> Dict[str, Any]:
+    """Extract and analyze existing schema markup"""
+    existing_schemas = {
+        'json_ld': [],
+        'microdata': [],
+        'rdfa': [],
+        'analysis': {
+            'has_schema': False,
+            'schema_types': [],
+            'completeness_score': 0,
+            'recommendations': []
+        }
+    }
+    
+    # JSON-LD extraction
+    json_ld_scripts = soup.find_all("script", type="application/ld+json")
+    for script in json_ld_scripts:
+        try:
+            data = json.loads(script.string)
+            existing_schemas['json_ld'].append(data)
+            existing_schemas['analysis']['has_schema'] = True
+            
+            # Extract schema types
+            if isinstance(data, dict):
+                schema_type = data.get('@type')
+                if schema_type:
+                    existing_schemas['analysis']['schema_types'].append(schema_type)
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and '@type' in item:
+                        existing_schemas['analysis']['schema_types'].append(item['@type'])
+                        
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    
+    # Microdata extraction
+    microdata_items = soup.find_all(attrs={"itemscope": True})
+    for item in microdata_items:
+        item_type = item.get("itemtype", "")
+        item_props = {}
+        
+        for prop in item.find_all(attrs={"itemprop": True}):
+            prop_name = prop.get("itemprop")
+            prop_value = prop.get("content") or prop.get_text(strip=True)
+            if prop_name and prop_value:
+                item_props[prop_name] = prop_value
+        
+        if item_type or item_props:
+            existing_schemas['microdata'].append({
+                'type': item_type,
+                'properties': item_props
+            })
+            existing_schemas['analysis']['has_schema'] = True
+    
+    # Analyze completeness and provide recommendations
+    if existing_schemas['json_ld']:
+        schema = existing_schemas['json_ld'][0]  # Analyze first schema
+        required_props = ['name', 'url', 'description']
+        present_props = [prop for prop in required_props if prop in schema]
+        existing_schemas['analysis']['completeness_score'] = len(present_props) / len(required_props)
+        
+        if 'image' not in schema:
+            existing_schemas['analysis']['recommendations'].append("Add image property")
+        if 'contactPoint' not in schema and schema.get('@type') == 'Organization':
+            existing_schemas['analysis']['recommendations'].append("Add contact information")
+        if 'sameAs' not in schema:
+            existing_schemas['analysis']['recommendations'].append("Add social media links")
+    
+    return existing_schemas
+
 def fetch_comprehensive_content(url: str) -> Dict[str, Any]:
-    """
-    Enhanced content extraction that scrapes comprehensive data for schema generation.
-    Returns a detailed dictionary with all relevant metadata and content.
-    """
+    """Enhanced content extraction with schema detection"""
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -41,23 +229,20 @@ def fetch_comprehensive_content(url: str) -> Dict[str, Any]:
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # Initialize comprehensive content dictionary
         content = {
             'url': url,
             'basic_metadata': extract_basic_metadata(soup),
+            'existing_schema': extract_existing_schema(soup),
             'social_metadata': extract_social_metadata(soup),
-            'structured_data': extract_existing_structured_data(soup),
             'content_analysis': analyze_page_content(soup),
             'author_info': extract_author_information(soup),
             'publication_info': extract_publication_data(soup),
-            'product_data': extract_product_information(soup),
-            'event_data': extract_event_information(soup),
-            'business_info': extract_business_information(soup),
+            'contact_info': extract_comprehensive_contact_info(soup),
+            'business_info': extract_comprehensive_business_info(soup),
+            'social_links': extract_social_links(soup),
             'media_content': extract_media_content(soup, url),
-            'navigation_structure': extract_navigation_structure(soup),
-            'page_structure': analyze_page_structure(soup),
             'seo_indicators': extract_seo_indicators(soup),
-            'contact_info': extract_contact_information(soup)
+            'page_structure': analyze_page_structure(soup)
         }
 
         return content
@@ -70,12 +255,11 @@ def fetch_comprehensive_content(url: str) -> Dict[str, Any]:
         raise Exception(f"Unexpected error during content extraction: {e}")
 
 def extract_basic_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract basic page metadata (title, description, etc.)"""
+    """Extract basic page metadata"""
     title = ""
     if soup.title and soup.title.string:
         title = str(soup.title.string).strip()
     
-    # Try multiple description sources
     description = ""
     desc_selectors = [
         'meta[name="description"]',
@@ -89,13 +273,11 @@ def extract_basic_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
             description = str(desc_tag.get("content")).strip()
             break
     
-    # Extract keywords
     keywords = []
     keywords_tag = soup.find("meta", {"name": "keywords"})
     if keywords_tag and keywords_tag.get("content"):
         keywords = [k.strip() for k in keywords_tag.get("content").split(",")]
     
-    # Extract language
     language = soup.get("lang") or soup.find("html", {"lang": True})
     if language and hasattr(language, 'get'):
         language = language.get("lang")
@@ -109,12 +291,8 @@ def extract_basic_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
     }
 
 def extract_social_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract Open Graph, Twitter Cards, and other social metadata"""
-    social_data = {
-        'og': {},
-        'twitter': {},
-        'article': {}
-    }
+    """Extract social media metadata"""
+    social_data = {'og': {}, 'twitter': {}, 'article': {}}
     
     # Open Graph data
     og_tags = soup.find_all("meta", property=lambda x: x and x.startswith("og:"))
@@ -132,64 +310,145 @@ def extract_social_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
         if name and content:
             social_data['twitter'][name] = content
     
-    # Article-specific meta tags
-    article_tags = soup.find_all("meta", property=lambda x: x and x.startswith("article:"))
-    for tag in article_tags:
-        prop = tag.get("property", "").replace("article:", "")
-        content = tag.get("content", "")
-        if prop and content:
-            social_data['article'][prop] = content
-    
     return social_data
 
-def extract_existing_structured_data(soup: BeautifulSoup) -> Dict[str, List]:
-    """Extract existing structured data (JSON-LD, microdata, RDFa)"""
-    structured_data = {
-        'json_ld': [],
-        'microdata': [],
-        'rdfa': []
+def extract_comprehensive_contact_info(soup: BeautifulSoup) -> Dict[str, Any]:
+    """Extract comprehensive contact information"""
+    contact_info = {
+        'emails': [],
+        'phones': [],
+        'fax': [],
+        'contact_points': []
     }
     
-    # JSON-LD extraction
-    json_ld_scripts = soup.find_all("script", type="application/ld+json")
-    for script in json_ld_scripts:
-        try:
-            data = json.loads(script.string)
-            structured_data['json_ld'].append(data)
-        except (json.JSONDecodeError, AttributeError):
-            continue
+    # Email extraction
+    email_patterns = [
+        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    ]
     
-    # Microdata extraction (basic)
-    microdata_items = soup.find_all(attrs={"itemscope": True})
-    for item in microdata_items:
-        item_type = item.get("itemtype", "")
-        item_props = {}
-        
-        for prop in item.find_all(attrs={"itemprop": True}):
-            prop_name = prop.get("itemprop")
-            prop_value = prop.get("content") or prop.get_text(strip=True)
-            if prop_name and prop_value:
-                item_props[prop_name] = prop_value
-        
-        if item_type or item_props:
-            structured_data['microdata'].append({
-                'type': item_type,
-                'properties': item_props
-            })
+    # From mailto links
+    email_links = soup.find_all('a', href=lambda x: x and x.startswith('mailto:'))
+    for link in email_links:
+        email = link.get('href', '').replace('mailto:', '').split('?')[0]
+        if email and email not in contact_info['emails']:
+            contact_info['emails'].append(email)
     
-    return structured_data
+    # From text content
+    page_text = soup.get_text()
+    for pattern in email_patterns:
+        emails = re.findall(pattern, page_text)
+        for email in emails:
+            if email not in contact_info['emails']:
+                contact_info['emails'].append(email)
+    
+    # Phone extraction
+    phone_patterns = [
+        r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+        r'\+\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+        r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b'
+    ]
+    
+    # From tel links
+    phone_links = soup.find_all('a', href=lambda x: x and x.startswith('tel:'))
+    for link in phone_links:
+        phone = link.get('href', '').replace('tel:', '').replace('+1', '')
+        if phone and phone not in contact_info['phones']:
+            contact_info['phones'].append(phone)
+    
+    # From text content
+    for pattern in phone_patterns:
+        phones = re.findall(pattern, page_text)
+        for phone in phones:
+            clean_phone = re.sub(r'[^\d+()-]', '', phone)
+            if len(clean_phone) >= 10 and clean_phone not in contact_info['phones']:
+                contact_info['phones'].append(phone)
+    
+    return contact_info
+
+def extract_comprehensive_business_info(soup: BeautifulSoup) -> Dict[str, Any]:
+    """Extract comprehensive business information"""
+    business_data = {
+        'name': None,
+        'address': {},
+        'coordinates': {},
+        'hours': [],
+        'price_range': None,
+        'services': []
+    }
+    
+    # Business name extraction
+    name_selectors = [
+        '[itemprop="name"]',
+        'h1',
+        '.company-name',
+        '.business-name',
+        '[class*="name"]'
+    ]
+    
+    for selector in name_selectors:
+        elem = soup.select_one(selector)
+        if elem:
+            business_data['name'] = elem.get_text(strip=True)
+            break
+    
+    # Address extraction with multiple strategies
+    address_selectors = {
+        'street': ['[itemprop="streetAddress"]', '.street', '.address-line-1'],
+        'city': ['[itemprop="addressLocality"]', '.city', '.locality'],
+        'state': ['[itemprop="addressRegion"]', '.state', '.region'],
+        'postal_code': ['[itemprop="postalCode"]', '.zip', '.postal-code'],
+        'country': ['[itemprop="addressCountry"]', '.country']
+    }
+    
+    for addr_type, selectors in address_selectors.items():
+        for selector in selectors:
+            elem = soup.select_one(selector)
+            if elem:
+                business_data['address'][addr_type] = elem.get_text(strip=True)
+                break
+    
+    # Extract full address from text if components not found
+    if not any(business_data['address'].values()):
+        address_patterns = [
+            r'\d+\s+[A-Za-z\s,.]+'  # Street address pattern
+        ]
+        page_text = soup.get_text()
+        for pattern in address_patterns:
+            matches = re.findall(pattern, page_text)
+            if matches:
+                # Simple address parsing
+                full_address = matches[0].strip()
+                business_data['address']['full'] = full_address
+                break
+    
+    return business_data
+
+def extract_social_links(soup: BeautifulSoup) -> List[str]:
+    """Extract social media links"""
+    social_links = []
+    social_domains = [
+        'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com',
+        'youtube.com', 'pinterest.com', 'tiktok.com', 'snapchat.com'
+    ]
+    
+    all_links = soup.find_all('a', href=True)
+    for link in all_links:
+        href = link.get('href', '')
+        for domain in social_domains:
+            if domain in href and href not in social_links:
+                social_links.append(href)
+                break
+    
+    return social_links
 
 def analyze_page_content(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Analyze the main content structure and extract key information"""
-    
-    # Create a copy for content analysis to avoid modifying original
+    """Analyze page content structure"""
     content_soup = BeautifulSoup(str(soup), "html.parser")
     
-    # Remove script and style elements
+    # Remove non-content elements
     for script in content_soup(["script", "style", "nav", "header", "footer", "aside"]):
         script.decompose()
     
-    # Extract main content
     main_content = ""
     content_selectors = [
         'main', 'article', '[role="main"]', '.content', '#content',
@@ -203,51 +462,26 @@ def analyze_page_content(soup: BeautifulSoup) -> Dict[str, Any]:
             break
     
     if not main_content:
-        # Fallback: get body text excluding common non-content elements
         body = content_soup.find('body')
         if body:
-            for elem in body.find_all(['nav', 'header', 'footer', 'aside', 'script', 'style']):
-                elem.decompose()
             main_content = body.get_text(strip=True)
     
-    # Extract headings structure from original soup
-    headings = []
-    for i in range(1, 7):
-        for heading in soup.find_all(f'h{i}'):
-            headings.append({
-                'level': i,
-                'text': heading.get_text(strip=True),
-                'id': heading.get('id')
-            })
-    
     return {
-        'main_text': main_content[:5000],  # Limit to first 5000 chars
+        'main_text': main_content[:3000],
         'word_count': len(main_content.split()) if main_content else 0,
-        'headings': headings,
-        'paragraphs_count': len(soup.find_all('p')),
         'has_forms': bool(soup.find_all('form')),
         'has_tables': bool(soup.find_all('table'))
     }
 
 def extract_author_information(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract author and byline information"""
-    author_info = {
-        'authors': [],
-        'byline': None,
-        'publisher': None
-    }
+    """Extract author information"""
+    author_info = {'authors': [], 'publisher': None}
     
-    # Common author selectors
     author_selectors = [
-        '[rel="author"]',
-        '.author',
-        '.byline',
-        '[itemprop="author"]',
-        'meta[name="author"]'
+        '[rel="author"]', '.author', '.byline', '[itemprop="author"]', 'meta[name="author"]'
     ]
     
-    authors = set()  # Use set to avoid duplicates
-    
+    authors = set()
     for selector in author_selectors:
         elements = soup.select(selector)
         for elem in elements:
@@ -256,46 +490,19 @@ def extract_author_information(soup: BeautifulSoup) -> Dict[str, Any]:
             else:
                 author_text = elem.get_text(strip=True)
             
-            if author_text and len(author_text) < 100:  # Reasonable author name length
+            if author_text and len(author_text) < 100:
                 authors.add(author_text)
     
     author_info['authors'] = list(authors)
-    
-    # Look for publisher information
-    publisher_selectors = [
-        '[itemprop="publisher"]',
-        'meta[property="article:publisher"]',
-        'meta[name="publisher"]'
-    ]
-    
-    for selector in publisher_selectors:
-        elem = soup.select_one(selector)
-        if elem:
-            if elem.name == 'meta':
-                author_info['publisher'] = elem.get('content', '')
-            else:
-                author_info['publisher'] = elem.get_text(strip=True)
-            break
-    
     return author_info
 
 def extract_publication_data(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract publication dates and related information"""
-    pub_data = {
-        'published_date': None,
-        'modified_date': None,
-        'dates_found': []
-    }
+    """Extract publication dates"""
+    pub_data = {'published_date': None, 'modified_date': None}
     
-    # Look for publication dates in various formats
     date_selectors = [
-        'time[datetime]',
-        '[itemprop="datePublished"]',
-        '[itemprop="dateModified"]',
-        'meta[property="article:published_time"]',
-        'meta[property="article:modified_time"]',
-        'meta[name="publish-date"]',
-        'meta[name="date"]'
+        'time[datetime]', '[itemprop="datePublished"]', '[itemprop="dateModified"]',
+        'meta[property="article:published_time"]', 'meta[property="article:modified_time"]'
     ]
     
     for selector in date_selectors:
@@ -311,13 +518,6 @@ def extract_publication_data(soup: BeautifulSoup) -> Dict[str, Any]:
                 date_value = elem.get('datetime') or elem.get_text(strip=True)
             
             if date_value:
-                pub_data['dates_found'].append({
-                    'selector': selector,
-                    'value': date_value,
-                    'element': elem.name
-                })
-                
-                # Try to identify specific date types
                 if 'publish' in selector.lower() and not pub_data['published_date']:
                     pub_data['published_date'] = date_value
                 elif 'modif' in selector.lower() and not pub_data['modified_date']:
@@ -325,140 +525,16 @@ def extract_publication_data(soup: BeautifulSoup) -> Dict[str, Any]:
     
     return pub_data
 
-def extract_product_information(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract product-specific information (prices, ratings, etc.)"""
-    product_data = {
-        'prices': [],
-        'ratings': [],
-        'availability': None,
-        'brand': None,
-        'model': None,
-        'sku': None
-    }
-    
-    # Price extraction
-    price_selectors = [
-        '[itemprop="price"]',
-        '.price',
-        '.cost',
-        '[class*="price"]',
-        'meta[property="product:price"]'
-    ]
-    
-    for selector in price_selectors:
-        elements = soup.select(selector)
-        for elem in elements:
-            price_text = elem.get('content') if elem.name == 'meta' else elem.get_text(strip=True)
-            if price_text and re.search(r'\d+\.?\d*', price_text):
-                product_data['prices'].append(price_text)
-    
-    # Rating extraction
-    rating_selectors = [
-        '[itemprop="ratingValue"]',
-        '.rating',
-        '.stars',
-        '[class*="rating"]'
-    ]
-    
-    for selector in rating_selectors:
-        elements = soup.select(selector)
-        for elem in elements:
-            rating_text = elem.get('content') if elem.name == 'meta' else elem.get_text(strip=True)
-            if rating_text:
-                product_data['ratings'].append(rating_text)
-    
-    # Brand, model, SKU
-    brand_elem = soup.select_one('[itemprop="brand"], meta[property="product:brand"]')
-    if brand_elem:
-        product_data['brand'] = brand_elem.get('content') or brand_elem.get_text(strip=True)
-    
-    model_elem = soup.select_one('[itemprop="model"], meta[property="product:model"]')
-    if model_elem:
-        product_data['model'] = model_elem.get('content') or model_elem.get_text(strip=True)
-    
-    sku_elem = soup.select_one('[itemprop="sku"], meta[property="product:retailer_item_id"]')
-    if sku_elem:
-        product_data['sku'] = sku_elem.get('content') or sku_elem.get_text(strip=True)
-    
-    return product_data
-
-def extract_event_information(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract event-specific information"""
-    event_data = {
-        'start_date': None,
-        'end_date': None,
-        'location': None,
-        'organizer': None,
-        'event_type': None
-    }
-    
-    # Event dates
-    start_date_elem = soup.select_one('[itemprop="startDate"], meta[property="event:start_time"]')
-    if start_date_elem:
-        event_data['start_date'] = start_date_elem.get('content') or start_date_elem.get('datetime')
-    
-    end_date_elem = soup.select_one('[itemprop="endDate"], meta[property="event:end_time"]')
-    if end_date_elem:
-        event_data['end_date'] = end_date_elem.get('content') or end_date_elem.get('datetime')
-    
-    # Location
-    location_elem = soup.select_one('[itemprop="location"], [itemprop="address"]')
-    if location_elem:
-        event_data['location'] = location_elem.get_text(strip=True)
-    
-    return event_data
-
-def extract_business_information(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract local business information"""
-    business_data = {
-        'name': None,
-        'address': {},
-        'phone': None,
-        'hours': [],
-        'coordinates': {}
-    }
-    
-    # Business name
-    name_elem = soup.select_one('[itemprop="name"], h1')
-    if name_elem:
-        business_data['name'] = name_elem.get_text(strip=True)
-    
-    # Address components
-    address_selectors = {
-        'street': '[itemprop="streetAddress"]',
-        'city': '[itemprop="addressLocality"]',
-        'state': '[itemprop="addressRegion"]',
-        'postal_code': '[itemprop="postalCode"]',
-        'country': '[itemprop="addressCountry"]'
-    }
-    
-    for addr_type, selector in address_selectors.items():
-        elem = soup.select_one(selector)
-        if elem:
-            business_data['address'][addr_type] = elem.get_text(strip=True)
-    
-    # Phone number
-    phone_elem = soup.select_one('[itemprop="telephone"], [href^="tel:"]')
-    if phone_elem:
-        business_data['phone'] = phone_elem.get('href', '').replace('tel:', '') or phone_elem.get_text(strip=True)
-    
-    return business_data
-
 def extract_media_content(soup: BeautifulSoup, base_url: str) -> Dict[str, Any]:
-    """Extract and categorize media content"""
-    media_data = {
-        'images': [],
-        'videos': [],
-        'featured_image': None
-    }
+    """Extract media content"""
+    media_data = {'images': [], 'featured_image': None, 'logo': None}
     
     # Images
     for img in soup.find_all('img', src=True):
         src = urljoin(base_url, img.get('src'))
         alt = img.get('alt', '')
-        title = img.get('title', '')
         
-        # Skip very small images (likely icons/logos)
+        # Skip small images
         width = img.get('width')
         height = img.get('height')
         if width and height:
@@ -468,384 +544,189 @@ def extract_media_content(soup: BeautifulSoup, base_url: str) -> Dict[str, Any]:
             except ValueError:
                 pass
         
-        media_data['images'].append({
-            'src': src,
-            'alt': alt,
-            'title': title,
-            'width': width,
-            'height': height
-        })
+        media_data['images'].append({'src': src, 'alt': alt})
     
-    # Featured image from meta tags
+    # Featured image
     og_image = soup.select_one('meta[property="og:image"]')
     if og_image:
         media_data['featured_image'] = og_image.get('content')
     elif media_data['images']:
-        # Use first substantial image as featured
         media_data['featured_image'] = media_data['images'][0]['src']
     
-    # Videos
-    for video in soup.find_all('video', src=True):
-        media_data['videos'].append({
-            'src': urljoin(base_url, video.get('src')),
-            'type': video.get('type', ''),
-            'poster': video.get('poster', '')
-        })
+    # Logo detection
+    logo_selectors = [
+        '.logo img', '[class*="logo"] img', '#logo img',
+        'img[alt*="logo"]', 'img[class*="logo"]'
+    ]
+    
+    for selector in logo_selectors:
+        logo_img = soup.select_one(selector)
+        if logo_img and logo_img.get('src'):
+            media_data['logo'] = urljoin(base_url, logo_img.get('src'))
+            break
     
     return media_data
 
-def extract_navigation_structure(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract navigation and breadcrumb information"""
-    nav_data = {
-        'breadcrumbs': [],
-        'main_navigation': [],
-        'pagination': {}
-    }
+def extract_seo_indicators(soup: BeautifulSoup) -> Dict[str, Any]:
+    """Extract SEO indicators"""
+    seo_data = {'canonical_url': None}
     
-    # Breadcrumbs
-    breadcrumb_selectors = [
-        '[itemtype*="BreadcrumbList"]',
-        '.breadcrumb',
-        '.breadcrumbs',
-        'nav[aria-label*="breadcrumb"]'
-    ]
+    canonical = soup.select_one('link[rel="canonical"]')
+    if canonical:
+        seo_data['canonical_url'] = canonical.get('href', '')
     
-    for selector in breadcrumb_selectors:
-        breadcrumb_container = soup.select_one(selector)
-        if breadcrumb_container:
-            links = breadcrumb_container.find_all('a')
-            for link in links:
-                nav_data['breadcrumbs'].append({
-                    'text': link.get_text(strip=True),
-                    'url': link.get('href', '')
-                })
-            break
-    
-    return nav_data
+    return seo_data
 
 def analyze_page_structure(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Analyze overall page structure for schema type hints"""
+    """Analyze page structure for schema hints"""
     structure = {
         'has_article_structure': False,
-        'has_product_structure': False,
-        'has_event_structure': False,
+        'has_organization_structure': False,
         'has_business_structure': False,
-        'content_indicators': []
+        'content_type': 'webpage'
     }
+    
+    # Organization/Business indicators
+    org_indicators = soup.select('.company, .organization, .business, [itemprop="organization"]')
+    contact_indicators = soup.select('.contact, .phone, .email, .address')
+    
+    if org_indicators or contact_indicators or soup.select('a[href^="mailto:"]') or soup.select('a[href^="tel:"]'):
+        structure['has_organization_structure'] = True
+        structure['content_type'] = 'organization'
     
     # Article indicators
     article_indicators = soup.select('article, .post, .entry, [itemprop="blogPost"]')
     if article_indicators or soup.select('time, .byline, .author'):
         structure['has_article_structure'] = True
-        structure['content_indicators'].append('article')
-    
-    # Product indicators
-    product_indicators = soup.select('.price, [itemprop="price"], .add-to-cart, .buy-now')
-    if product_indicators:
-        structure['has_product_structure'] = True
-        structure['content_indicators'].append('product')
-    
-    # Event indicators
-    event_indicators = soup.select('[itemprop="startDate"], .event-date, .calendar')
-    if event_indicators:
-        structure['has_event_structure'] = True
-        structure['content_indicators'].append('event')
-    
-    # Business indicators
-    business_indicators = soup.select('[itemprop="address"], .address, .phone, .hours')
-    if business_indicators:
-        structure['has_business_structure'] = True
-        structure['content_indicators'].append('business')
+        if structure['content_type'] == 'webpage':
+            structure['content_type'] = 'article'
     
     return structure
-
-def extract_seo_indicators(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract SEO-related indicators that help with schema type detection"""
-    seo_data = {
-        'meta_robots': None,
-        'canonical_url': None,
-        'hreflang': [],
-        'schema_hints': []
-    }
-    
-    # Meta robots
-    robots_tag = soup.select_one('meta[name="robots"]')
-    if robots_tag:
-        seo_data['meta_robots'] = robots_tag.get('content', '')
-    
-    # Canonical URL
-    canonical = soup.select_one('link[rel="canonical"]')
-    if canonical:
-        seo_data['canonical_url'] = canonical.get('href', '')
-    
-    # Hreflang
-    hreflang_tags = soup.select('link[rel="alternate"][hreflang]')
-    for tag in hreflang_tags:
-        seo_data['hreflang'].append({
-            'lang': tag.get('hreflang'),
-            'url': tag.get('href')
-        })
-    
-    return seo_data
-
-def extract_contact_information(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract contact information"""
-    contact_data = {
-        'emails': [],
-        'phones': [],
-        'social_links': []
-    }
-    
-    # Email addresses
-    email_links = soup.find_all('a', href=lambda x: x and x.startswith('mailto:'))
-    for link in email_links:
-        email = link.get('href', '').replace('mailto:', '')
-        if email:
-            contact_data['emails'].append(email)
-    
-    # Phone numbers
-    phone_links = soup.find_all('a', href=lambda x: x and x.startswith('tel:'))
-    for link in phone_links:
-        phone = link.get('href', '').replace('tel:', '')
-        if phone:
-            contact_data['phones'].append(phone)
-    
-    # Social media links
-    social_domains = ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com']
-    for link in soup.find_all('a', href=True):
-        href = link.get('href', '')
-        for domain in social_domains:
-            if domain in href:
-                contact_data['social_links'].append({
-                    'platform': domain.split('.')[0],
-                    'url': href
-                })
-                break
-    
-    return contact_data
 
 def extract_canonical_url(soup: BeautifulSoup) -> Optional[str]:
     """Extract canonical URL"""
     canonical = soup.select_one('link[rel="canonical"]')
     return canonical.get('href') if canonical else None
 
-# --- Enhanced Web Scraping Function ---
-def fetch_content(url):
-    """
-    Legacy function maintained for backward compatibility.
-    Returns simplified structure matching original format.
-    """
-    try:
-        comprehensive_data = fetch_comprehensive_content(url)
-        
-        # Extract basic data in original format for compatibility
-        title = comprehensive_data['basic_metadata']['title']
-        description = comprehensive_data['basic_metadata']['description']
-        
-        # Get dates from comprehensive extraction
-        dates = []
-        if comprehensive_data['publication_info']['published_date']:
-            dates.append(comprehensive_data['publication_info']['published_date'])
-        if comprehensive_data['publication_info']['modified_date']:
-            dates.append(comprehensive_data['publication_info']['modified_date'])
-        
-        # Add dates from comprehensive extraction
-        for date_info in comprehensive_data['publication_info']['dates_found']:
-            if date_info['value'] not in dates:
-                dates.append(date_info['value'])
-        
-        # Get images from comprehensive extraction
-        images = [img['src'] for img in comprehensive_data['media_content']['images'][:5]]
-        
-        return {
-            "title": title,
-            "description": description, 
-            "dates": dates,
-            "images": images,
-            "comprehensive_data": comprehensive_data  # Include full data for advanced processing
-        }
-        
-    except Exception as e:
-        st.error(f"Error during content extraction: {e}")
-        return {"title": "", "description": "", "dates": [], "images": [], "comprehensive_data": None}
-
-# --- Enhanced Gemini Inference Function ---
-
-def analyze_url_patterns(url: str) -> str:
-    """Analyze URL patterns to provide hints about content type"""
-    url_lower = url.lower()
+# --- Enhanced Gemini Analysis ---
+def create_comprehensive_schema_prompt(comprehensive_data: dict, url: str, template_type: str = None) -> str:
+    """Create enhanced prompt for comprehensive schema generation"""
     
-    patterns = {
-        'product': ['/product/', '/item/', '/buy/', '/shop/', '/store/'],
-        'article': ['/article/', '/post/', '/blog/', '/news/', '/story/'],
-        'event': ['/event/', '/calendar/', '/conference/', '/meeting/'],
-        'business': ['/about/', '/contact/', '/location/', '/store-locator/'],
-        'recipe': ['/recipe/', '/cooking/', '/food/'],
-        'review': ['/review/', '/rating/'],
-        'job': ['/job/', '/career/', '/hiring/']
-    }
-    
-    detected_patterns = []
-    for content_type, url_patterns in patterns.items():
-        if any(pattern in url_lower for pattern in url_patterns):
-            detected_patterns.append(content_type)
-    
-    return ', '.join(detected_patterns) if detected_patterns else 'generic'
-
-def format_address(address_dict: dict) -> str:
-    """Format address dictionary into readable string"""
-    if not address_dict:
-        return 'None'
-    
-    components = []
-    for key in ['street', 'city', 'state', 'postal_code', 'country']:
-        if address_dict.get(key):
-            components.append(address_dict[key])
-    
-    return ', '.join(components) if components else 'None'
-
-def extract_existing_types(existing_schema: dict) -> str:
-    """Extract existing schema types from structured data"""
-    types = []
-    
-    for json_ld in existing_schema['json_ld']:
-        if isinstance(json_ld, dict):
-            schema_type = json_ld.get('@type') or json_ld.get('type')
-            if schema_type:
-                if isinstance(schema_type, list):
-                    types.extend(schema_type)
-                else:
-                    types.append(schema_type)
-    
-    for microdata in existing_schema['microdata']:
-        if microdata.get('type'):
-            types.append(microdata['type'].split('/')[-1])  # Get last part of URL
-    
-    return ', '.join(set(types)) if types else 'None'
-
-def gemini_infer_schema_details_enhanced(comprehensive_data: dict, url: str):
-    """
-    Enhanced Gemini inference using comprehensive extracted data for better schema detection.
-    """
-    
-    # Extract key information from comprehensive data
     basic_meta = comprehensive_data['basic_metadata']
-    social_meta = comprehensive_data['social_metadata']
-    content_analysis = comprehensive_data['content_analysis']
-    author_info = comprehensive_data['author_info']
-    pub_info = comprehensive_data['publication_info']
-    product_data = comprehensive_data['product_data']
-    event_data = comprehensive_data['event_data']
+    existing_schema = comprehensive_data['existing_schema']
+    contact_info = comprehensive_data['contact_info']
     business_info = comprehensive_data['business_info']
+    social_links = comprehensive_data['social_links']
+    media_content = comprehensive_data['media_content']
     page_structure = comprehensive_data['page_structure']
-    existing_schema = comprehensive_data['structured_data']
     
-    # Build context summary for Gemini
-    context_summary = {
-        'url_analysis': analyze_url_patterns(url),
-        'content_indicators': page_structure['content_indicators'],
-        'has_existing_schema': bool(existing_schema['json_ld']),
-        'content_length': content_analysis['word_count'],
-        'has_author': bool(author_info['authors']),
-        'has_publication_date': bool(pub_info['published_date']),
-        'has_product_indicators': bool(product_data['prices']),
-        'has_event_indicators': bool(event_data['start_date']),
-        'has_business_indicators': bool(business_info['address'])
-    }
-    
-    # Create enhanced prompt
-    prompt = f"""You are an expert in Schema.org JSON-LD markup. Analyze this comprehensive web page data to determine the most appropriate Schema.org type and properties.
-
+    # Build context for Gemini
+    context = f"""
 **URL:** {url}
-**URL Pattern Analysis:** {context_summary['url_analysis']}
+**Page Type:** {page_structure['content_type']}
 
-**Page Content Analysis:**
+**Basic Information:**
 - Title: {basic_meta['title']}
 - Description: {basic_meta['description']}
-- Content Length: {content_analysis['word_count']} words
-- Main Content Preview: {content_analysis['main_text'][:500]}...
-- Content Indicators: {', '.join(context_summary['content_indicators'])}
+- Language: {basic_meta['language']}
 
-**Author & Publication Info:**
-- Authors: {', '.join(author_info['authors']) if author_info['authors'] else 'None'}
-- Publisher: {author_info['publisher'] or 'None'}
-- Published Date: {pub_info['published_date'] or 'None'}
-- Modified Date: {pub_info['modified_date'] or 'None'}
+**Existing Schema Analysis:**
+- Has existing schema: {existing_schema['analysis']['has_schema']}
+- Schema types found: {', '.join(existing_schema['analysis']['schema_types'])}
+- Completeness score: {existing_schema['analysis']['completeness_score']:.2f}
+- Recommendations: {'; '.join(existing_schema['analysis']['recommendations'])}
 
-**Product Information (if applicable):**
-- Prices Found: {', '.join(product_data['prices'][:3]) if product_data['prices'] else 'None'}
-- Brand: {product_data['brand'] or 'None'}
-- Ratings: {', '.join(product_data['ratings'][:2]) if product_data['ratings'] else 'None'}
+**Contact Information:**
+- Emails: {', '.join(contact_info['emails'][:3])}
+- Phones: {', '.join(contact_info['phones'][:3])}
 
-**Event Information (if applicable):**
-- Start Date: {event_data['start_date'] or 'None'}
-- Location: {event_data['location'] or 'None'}
+**Business Information:**
+- Name: {business_info['name']}
+- Address: {business_info['address']}
 
-**Business Information (if applicable):**
-- Business Name: {business_info['name'] or 'None'}
-- Address: {format_address(business_info['address'])}
-- Phone: {business_info['phone'] or 'None'}
+**Social Media:**
+- Social links found: {len(social_links)}
+- Links: {'; '.join(social_links[:5])}
 
 **Media Content:**
-- Featured Image: {comprehensive_data['media_content']['featured_image'] or 'None'}
-- Total Images: {len(comprehensive_data['media_content']['images'])}
+- Featured image: {media_content['featured_image']}
+- Logo: {media_content['logo']}
+- Total images: {len(media_content['images'])}
 
-**Social Media Metadata:**
-- Open Graph Type: {social_meta['og'].get('type', 'None')}
-- Article Tags: {', '.join([f"{k}: {v}" for k, v in social_meta['article'].items()][:3]) if social_meta['article'] else 'None'}
+**Template Preference:** {template_type or 'Auto-detect'}
+"""
 
-**Existing Structured Data:**
-- Has JSON-LD: {bool(existing_schema['json_ld'])}
-- Existing Types: {extract_existing_types(existing_schema)}
+    prompt = f"""You are an expert Schema.org consultant. Create comprehensive, production-ready JSON-LD markup.
 
-**Page Structure Indicators:**
-- Has Article Structure: {page_structure['has_article_structure']}
-- Has Product Structure: {page_structure['has_product_structure']}
-- Has Event Structure: {page_structure['has_event_structure']}
-- Has Business Structure: {page_structure['has_business_structure']}
+{context}
 
-Based on this comprehensive analysis, determine:
-1. The SINGLE most appropriate primary Schema.org @type
-2. All relevant properties with their values extracted from the data above
+**REQUIREMENTS:**
+1. **Comprehensive Coverage**: Include ALL relevant properties, not just basic ones
+2. **Contact Points**: For organizations, create detailed contactPoint arrays with different departments/purposes
+3. **Social Media**: Include complete sameAs array with all social profiles found
+4. **Address**: Use proper PostalAddress structure with all components
+5. **Enhanced Properties**: Add keywords, subjectOf, location, etc. where relevant
+6. **Nested Objects**: Use proper nested structures (ContactPoint, PostalAddress, etc.)
 
-**IMPORTANT INSTRUCTIONS:**
-- Consider URL patterns, content indicators, and existing structured data
-- For articles: include author, publisher, datePublished, headline, articleBody summary
-- For products: include price, brand, availability, ratings if found
-- For events: include startDate, location, organizer if found  
-- For businesses: include address components, phone, openingHours if found
-- Always include: name, description, url, image (if available)
-- If multiple schema types seem applicable, choose the MOST SPECIFIC one
-- Omit properties with no meaningful data
-
-**Output Format - JSON Only:**
+**EXAMPLE COMPREHENSIVE OUTPUT STYLE:**
 ```json
 {{
-  "type": "SchemaType",
-  "confidence_score": 0.95,
-  "reasoning": "Brief explanation of why this type was chosen",
-  "properties": {{
-    "name": "Page title or item name",
-    "description": "Page description", 
-    "url": "{url}",
-    "image": "featured image URL or first image",
-    // Include all other relevant properties based on the schema type
-  }}
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Company Name",
+  "url": "https://example.com",
+  "logo": "https://example.com/logo.jpg",
+  "description": "...",
+  "image": "https://example.com/image.jpg",
+  "contactPoint": [
+    {{
+      "@type": "ContactPoint",
+      "contactType": "sales",
+      "areaServed": "US",
+      "availableLanguage": "English",
+      "email": "sales@example.com",
+      "telephone": "(800) 123-4567",
+      "description": "Sales Department"
+    }}
+  ],
+  "sameAs": [
+    "https://www.facebook.com/company",
+    "https://twitter.com/company"
+  ],
+  "address": {{
+    "@type": "PostalAddress",
+    "streetAddress": "123 Main St",
+    "addressLocality": "City",
+    "addressRegion": "State",
+    "postalCode": "12345",
+    "addressCountry": "US"
+  }},
+  "keywords": ["keyword1", "keyword2"],
+  "telephone": "+1-800-123-4567"
 }}
 ```
 
-Generate the JSON response now:"""
+**OUTPUT ONLY VALID JSON - NO EXPLANATIONS OR MARKDOWN**
+"""
 
+    return prompt
+
+def generate_comprehensive_schema(comprehensive_data: dict, url: str, template_type: str = None):
+    """Generate comprehensive schema using enhanced Gemini analysis"""
+    
     try:
         model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = create_comprehensive_schema_prompt(comprehensive_data, url, template_type)
+        
         response = model.generate_content(prompt)
         
         if not response.text:
             raise ValueError("Gemini returned an empty response")
-            
+        
+        # Clean response
         raw_json_str = response.text.strip()
         
-        # Extract JSON from markdown code block
+        # Remove markdown formatting
         if raw_json_str.startswith("```json"):
             json_str = raw_json_str[len("```json"):].strip()
             if json_str.endswith("```"):
@@ -856,491 +737,271 @@ Generate the JSON response now:"""
                 json_str = json_str[:-3].strip()
         else:
             json_str = raw_json_str
-
-        parsed_response = json.loads(json_str)
         
-        inferred_type = parsed_response.get("type", "WebPage").strip()
-        confidence_score = parsed_response.get("confidence_score", 0.5)
-        reasoning = parsed_response.get("reasoning", "No reasoning provided")
-        inferred_properties = parsed_response.get("properties", {})
-
-        return inferred_type, inferred_properties, confidence_score, reasoning
-
+        # Parse and validate JSON
+        parsed_schema = json.loads(json_str)
+        
+        # Ensure required fields
+        if "@context" not in parsed_schema:
+            parsed_schema["@context"] = "https://schema.org"
+        
+        return parsed_schema, 0.95, "Comprehensive schema generated successfully"
+        
     except json.JSONDecodeError as e:
-        st.error(f"Gemini output was not valid JSON. Error: {e}")
-        st.code(f"Raw Gemini Output:\n{raw_json_str}", language="text")
-        return "WebPage", {}, 0.0, "Failed to parse Gemini response"
+        st.error(f"Failed to parse Gemini JSON output: {e}")
+        return None, 0.0, f"JSON parsing failed: {str(e)}"
     except Exception as e:
-        st.error(f"Error during Gemini schema inference: {e}")
-        return "WebPage", {}, 0.0, f"Error: {str(e)}"
-
-# --- Original Gemini Inference Function (for backward compatibility) ---
-def gemini_infer_schema_details(context: dict, url: str):
-    """
-    Original Gemini inference function maintained for backward compatibility.
-    """
-    # Use enhanced function if comprehensive data is available
-    if 'comprehensive_data' in context and context['comprehensive_data']:
-        return gemini_infer_schema_details_enhanced(context['comprehensive_data'], url)
-    
-    # Fallback to original simple inference
-    example_json_content = """{
-  "type": "Article",
-  "properties": {
-    "name": "<Page Title>",
-    "headline": "<Page Title>",
-    "description": "<Page Description>",
-    "image": "<First Image URL>",
-    "datePublished": "<First Date/Time>",
-    "url": "<Original Page URL>"
-  }
-}"""
-
-    prompt_template = (
-        "You are an expert in Schema.org JSON-LD markup.\n"
-        "Based on the following web page content and URL, your task is to identify the single most appropriate primary Schema.org `@type` "
-        "(e.g., WebPage, Article, Product, Event, LocalBusiness, Organization, Person, Recipe).\n"
-        "Then, list the most relevant Schema.org properties for that specific `@type`, along with the corresponding data extracted directly from the provided page context.\n"
-        "\n"
-        "**Output Format:**\n"
-        "* Strictly output a single JSON object.\n"
-        "* The top-level object must have two keys:\n"
-        "    * `\"type\"`: A string representing the chosen Schema.org `@type` (e.g., \"WebPage\", \"Article\").\n"
-        "    * `\"properties\"`: A JSON object (dictionary) where keys are standard Schema.org property names (in camelCase, e.g., \"name\", \"headline\", \"description\", \"image\", \"datePublished\", \"url\", \"price\", \"brand\"). Values should be the extracted data.\n"
-        "* If a property value is not available, is \"N/A\", or is an empty string, **omit that property entirely** from the \"properties\" dictionary.\n"
-        "* Ensure the `\"url\"` property within the `\"properties\"` dictionary is always populated with the `Original Page URL`.\n"
-        "* Do NOT include any additional text, explanations, or markdown outside the single JSON code block.\n"
-        "\n"
-        "**Provided Page Content:**\n"
-        "Page Title: {page_title}\n"
-        "Page Description: {page_description}\n"
-        "First available date/time (if any): {first_date}\n"
-        "First 5 image URLs: {image_urls}\n"
-        "Original Page URL: {original_url}\n"
-        "\n"
-        "Example of expected JSON output:\n"
-        "```json\n"
-        "{json_example}\n"
-        "```\n"
-        "\n"
-        "Now, generate the JSON output for the provided page content:\n"
-    )
-
-    prompt = prompt_template.format(
-        page_title=context['title'],
-        page_description=context['description'],
-        first_date=context['dates'][0] if context['dates'] else 'N/A',
-        image_urls=', '.join(context['images']) if context['images'] else 'N/A',
-        original_url=url,
-        json_example=example_json_content
-    )
-
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    try:
-        response = model.generate_content(prompt)
-        if not response.text:
-            raise ValueError("Gemini returned an empty response.")
-            
-        raw_json_str = response.text.strip()
-        
-        if raw_json_str.startswith("```json"):
-            json_str = raw_json_str[len("```json"):].strip()
-            if json_str.endswith("```"):
-                json_str = json_str[:-len("```")].strip()
-            else:
-                json_str = raw_json_str
-        else:
-            json_str = raw_json_str
-
-        parsed_gemini_output = json.loads(json_str)
-
-        inferred_type = parsed_gemini_output.get("type", "WebPage").strip()
-        inferred_properties = parsed_gemini_output.get("properties", {})
-
-        if not inferred_type:
-            inferred_type = "WebPage"
-
-        return inferred_type, inferred_properties
-
-    except json.JSONDecodeError as e:
-        st.error(f"Gemini output was not valid JSON. Error: {e}")
-        st.code(f"Raw Gemini Output:\n{raw_json_str}", language="text")
-        return "WebPage", {}
-    except Exception as e:
-        st.error(f"An error occurred during Gemini schema inference: {e}")
-        return "WebPage", {}
-
-# --- Schema.org Model Mapping ---
-SCHEMA_MODEL_MAP = {
-    "Article": Article,
-    "WebPage": WebPage,
-    "Product": Product,
-    "Event": Event,
-    "Organization": Organization,
-    "Person": Person,
-    "Place": Place,
-    "LocalBusiness": LocalBusiness,
-    "Service": Service,
-    "Recipe": Recipe,
-    "Review": Review,
-    "ImageObject": ImageObject,
-    "VideoObject": VideoObject,
-    "NewsArticle": NewsArticle,
-    "BlogPosting": BlogPosting,
-    "CreativeWork": CreativeWork,
-    "Thing": Thing,
-}
-
-# --- Schema Object Builder Function ---
-def build_schema_obj_from_inferred(inferred_type: str, inferred_properties: dict, original_url: str):
-    """
-    Constructs a msgspec_schemaorg object based on Gemini's inference,
-    with robust type handling and fallbacks.
-    """
-    model_properties = {}
-
-    SchemaModel = SCHEMA_MODEL_MAP.get(inferred_type)
-    if not SchemaModel:
-         st.warning(f"Schema.org type '{inferred_type}' is not explicitly supported by the application. Defaulting to WebPage.")
-         SchemaModel = WebPage
-         inferred_type = "WebPage" 
-
-    model_properties["url"] = original_url
-    
-    for prop_name, prop_value in inferred_properties.items():
-        if prop_value is None or (isinstance(prop_value, str) and prop_value.strip() in ["", "N/A"]):
-            continue
-
-        try:
-            if prop_name in ["datePublished", "dateModified", "startDate", "endDate"]:
-                if isinstance(prop_value, str) and prop_value:
-                    model_properties[prop_name] = parse_iso8601(prop_value)
-                else:
-                    st.warning(f"Invalid date format for '{prop_name}': '{prop_value}'. Omitting.")
-                    continue
-            elif prop_name == "image":
-                if isinstance(prop_value, str) and prop_value:
-                    model_properties[prop_name] = prop_value
-                else:
-                    st.warning(f"Invalid image URL format for '{prop_name}': '{prop_value}'. Omitting.")
-                    continue
-            elif prop_name in ["price", "ratingValue", "reviewCount", "aggregateRating.ratingValue", "aggregateRating.reviewCount"]:
-                try:
-                    if isinstance(prop_value, str):
-                        prop_value = prop_value.replace(',', '')
-                    
-                    if '.' in str(prop_value):
-                        model_properties[prop_name] = float(prop_value)
-                    else:
-                        model_properties[prop_name] = int(prop_value)
-                except ValueError:
-                    st.warning(f"Invalid number format for '{prop_name}': '{prop_value}'. Omitting.")
-                    continue
-            else:
-                model_properties[prop_name] = prop_value
-
-        except Exception as e:
-            st.warning(f"Failed to process property '{prop_name}' with value '{prop_value}': {e}. Omitting.")
-            continue
-
-    try:
-        schema_instance = SchemaModel(**model_properties)
-        return schema_instance
-    except Exception as e:
-        st.error(f"Schema.org model validation failed for '{inferred_type}' type with properties {model_properties}: {e}")
-        st.warning("Attempting to generate a generic WebPage schema as a fallback due to model validation issues.")
-        return WebPage(
-            name=model_properties.get("name", "Generated WebPage"),
-            description=model_properties.get("description", ""),
-            url=original_url
-        )
-
-# --- JSON-LD Serialization Function ---
-def to_jsonld(obj):
-    """
-    Converts a msgspec_schemaorg object to a pretty-printed JSON-LD string,
-    ensuring @context and @type are present.
-    """
-    try:
-        raw_bytes = msgspec.json.encode(obj)
-        data = json.loads(raw_bytes.decode('utf-8'))
-        
-        if "@context" not in data:
-            data["@context"] = "https://schema.org"
-        
-        ordered_data = {"@context": data.pop("@context")}
-        if "@type" in data:
-            ordered_data["@type"] = data.pop("@type")
-        ordered_data.update(data)
-
-        return json.dumps(ordered_data, indent=2, ensure_ascii=False)
-    except Exception as e:
-        st.error(f"Critical error during final JSON-LD serialization: {e}")
-        st.exception(e)
-        return "Error: Could not generate final JSON-LD output."
+        st.error(f"Error generating schema: {e}")
+        return None, 0.0, f"Generation failed: {str(e)}"
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Schema.org JSON-LD Generator", page_icon="📘", layout="centered")
+st.set_page_config(page_title="Comprehensive Schema.org Generator", page_icon="🔗", layout="wide")
 
-st.title("📘 Schema.org JSON‑LD Generator (Enhanced)")
+st.title("🔗 Comprehensive Schema.org JSON-LD Generator")
 st.markdown("""
-This enhanced tool uses a comprehensive hybrid approach to generate Schema.org JSON-LD markup:
-
-1.  **Advanced Content Scraping**: Extracts 15+ categories of metadata including social media tags, existing structured data, author info, product details, and more.
-2.  **AI-Powered Analysis (Google Gemini)**: Uses comprehensive extracted data to intelligently determine the most appropriate Schema.org type with confidence scoring.
-3.  **Robust Construction & Validation**: Builds validated JSON-LD using Python's `msgspec_schemaorg` library with comprehensive error handling.
-
-**New Features:**
-- 📊 Comprehensive content analysis with tabbed interface
-- 🎯 Multi-signal schema type detection 
-- 📈 Confidence scoring for AI recommendations
-- 🔍 Detailed extraction reporting
-- ✅ Built-in validation checks
+Generate production-ready, comprehensive Schema.org markup with:
+- **Existing Schema Detection & Enhancement**
+- **Custom Templates** for different content types
+- **Comprehensive Contact & Social Media Integration**  
+- **Multi-department Contact Points** (like the Sugatsune example)
 """)
 
-url = st.text_input("Enter a URL", placeholder="e.g., https://www.example.com/blog-post-about-ai", key="url_input")
-
-if st.button("Generate Schema", key="generate_button"):
-    if not url:
-        st.warning("Please enter a URL to proceed.")
-    elif not url.startswith(("http://", "https://")):
-        st.warning("Please enter a valid URL, starting with `http://` or `https://`.")
-    else:
-        with st.spinner("Extracting comprehensive content... This may take a moment."):
-            # Use the backward-compatible fetch_content function
-            raw_data = fetch_content(url)
-            comprehensive_data = raw_data.get('comprehensive_data')
-
-            if not comprehensive_data:
-                st.error("Could not fetch comprehensive content from the provided URL.")
-                st.info("Ensure the URL is publicly accessible and contains standard HTML content.")
-            else:
-                # Display comprehensive extraction results
-                st.subheader("🔍 Comprehensive Content Analysis")
-                
-                # Create tabs for different data categories
-                tab1, tab2, tab3, tab4, tab5 = st.tabs(["📄 Basic Info", "🏗️ Structure", "📊 Content Analysis", "🎯 Schema Hints", "🔧 Raw Data"])
-                
-                with tab1:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write("**Basic Metadata:**")
-                        basic_meta = comprehensive_data['basic_metadata']
-                        st.write(f"• **Title:** {basic_meta['title']}")
-                        st.write(f"• **Description:** {basic_meta['description'][:200]}{'...' if len(basic_meta['description']) > 200 else ''}")
-                        st.write(f"• **Language:** {basic_meta['language'] or 'Not specified'}")
-                        st.write(f"• **Keywords:** {', '.join(basic_meta['keywords'][:5]) if basic_meta['keywords'] else 'None found'}")
-                        
-                        st.write("**Publication Info:**")
-                        pub_info = comprehensive_data['publication_info']
-                        st.write(f"• **Published:** {pub_info['published_date'] or 'Not found'}")
-                        st.write(f"• **Modified:** {pub_info['modified_date'] or 'Not found'}")
-                        
-                        st.write("**Author Information:**")
-                        author_info = comprehensive_data['author_info']
-                        st.write(f"• **Authors:** {', '.join(author_info['authors']) if author_info['authors'] else 'Not found'}")
-                        st.write(f"• **Publisher:** {author_info['publisher'] or 'Not found'}")
-                    
-                    with col2:
-                        st.write("**Media Content:**")
-                        media_content = comprehensive_data['media_content']
-                        st.write(f"• **Images found:** {len(media_content['images'])}")
-                        st.write(f"• **Videos found:** {len(media_content['videos'])}")
-                        if media_content['featured_image']:
-                            st.write("• **Featured Image:**")
-                            try:
-                                st.image(media_content['featured_image'], width=200)
-                            except:
-                                st.write(f"  {media_content['featured_image']}")
-                        
-                        st.write("**Social Media Metadata:**")
-                        social_meta = comprehensive_data['social_metadata']
-                        if social_meta['og']:
-                            st.write(f"• **Open Graph type:** {social_meta['og'].get('type', 'Not specified')}")
-                            st.write(f"• **OG title:** {social_meta['og'].get('title', 'Not found')}")
-                        if social_meta['twitter']:
-                            st.write(f"• **Twitter card:** {social_meta['twitter'].get('card', 'Not found')}")
-
-                with tab2:
-                    st.write("**Page Structure Analysis:**")
-                    structure = comprehensive_data['page_structure']
-                    content_analysis = comprehensive_data['content_analysis']
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.write("**Content Type Indicators:**")
-                        st.write(f"• Article structure: {'✅' if structure['has_article_structure'] else '❌'}")
-                        st.write(f"• Product structure: {'✅' if structure['has_product_structure'] else '❌'}")
-                        st.write(f"• Event structure: {'✅' if structure['has_event_structure'] else '❌'}")
-                        st.write(f"• Business structure: {'✅' if structure['has_business_structure'] else '❌'}")
-                        
-                        st.write("**Content Metrics:**")
-                        st.write(f"• Word count: {content_analysis['word_count']:,}")
-                        st.write(f"• Paragraphs: {content_analysis['paragraphs_count']}")
-                        st.write(f"• Headings: {len(content_analysis['headings'])}")
-                        st.write(f"• Has forms: {'Yes' if content_analysis['has_forms'] else 'No'}")
-                        st.write(f"• Has tables: {'Yes' if content_analysis['has_tables'] else 'No'}")
-                    
-                    with col2:
-                        if content_analysis['headings']:
-                            st.write("**Heading Structure:**")
-                            for heading in content_analysis['headings'][:8]:  # Show first 8 headings
-                                indent = "  " * (heading['level'] - 1)
-                                st.write(f"{indent}H{heading['level']}: {heading['text'][:60]}{'...' if len(heading['text']) > 60 else ''}")
-
-                with tab3:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Product data
-                        product_data = comprehensive_data['product_data']
-                        if any(product_data.values()):
-                            st.write("**Product Information:**")
-                            if product_data['prices']:
-                                st.write(f"• **Prices:** {', '.join(product_data['prices'][:3])}")
-                            if product_data['brand']:
-                                st.write(f"• **Brand:** {product_data['brand']}")
-                            if product_data['ratings']:
-                                st.write(f"• **Ratings:** {', '.join(product_data['ratings'][:2])}")
-                        
-                        # Event data
-                        event_data = comprehensive_data['event_data']
-                        if any(event_data.values()):
-                            st.write("**Event Information:**")
-                            if event_data['start_date']:
-                                st.write(f"• **Start Date:** {event_data['start_date']}")
-                            if event_data['location']:
-                                st.write(f"• **Location:** {event_data['location']}")
-                    
-                    with col2:
-                        # Business data
-                        business_info = comprehensive_data['business_info']
-                        if any(business_info.values()) and business_info['address']:
-                            st.write("**Business Information:**")
-                            if business_info['name']:
-                                st.write(f"• **Name:** {business_info['name']}")
-                            if business_info['address']:
-                                formatted_address = format_address(business_info['address'])
-                                if formatted_address != 'None':
-                                    st.write(f"• **Address:** {formatted_address}")
-                            if business_info['phone']:
-                                st.write(f"• **Phone:** {business_info['phone']}")
-                        
-                        # Contact info
-                        contact_info = comprehensive_data['contact_info']
-                        if any(contact_info.values()):
-                            st.write("**Contact Information:**")
-                            if contact_info['emails']:
-                                st.write(f"• **Emails:** {', '.join(contact_info['emails'][:2])}")
-                            if contact_info['social_links']:
-                                platforms = [link['platform'] for link in contact_info['social_links'][:3]]
-                                st.write(f"• **Social Media:** {', '.join(platforms)}")
-
-                with tab4:
-                    st.write("**Schema.org Detection Hints:**")
-                    
-                    # URL analysis
-                    url_patterns = analyze_url_patterns(url)
-                    st.write(f"**URL Pattern Analysis:** {url_patterns}")
-                    
-                    # Existing structured data
-                    existing_schema = comprehensive_data['structured_data']
-                    if existing_schema['json_ld']:
-                        st.write("**Existing JSON-LD found:**")
-                        for i, schema in enumerate(existing_schema['json_ld'][:2]):  # Show first 2
-                            schema_type = schema.get('@type', 'Unknown')
-                            st.write(f"• Schema {i+1}: {schema_type}")
-                    
-                    if existing_schema['microdata']:
-                        st.write("**Existing Microdata found:**")
-                        for item in existing_schema['microdata'][:3]:  # Show first 3
-                            st.write(f"• Type: {item.get('type', 'Unknown')}")
-                    
-                    # Content indicators
-                    st.write(f"**Content Type Indicators:** {', '.join(structure['content_indicators'])}")
-
-                with tab5:
-                    st.write("**Raw Comprehensive Data (for debugging):**")
-                    st.json(comprehensive_data)
-
-                # Enhanced Gemini inference
-                st.subheader("🤖 AI-Powered Schema Analysis")
-                
-                with st.spinner("Analyzing content with Gemini AI..."):
-                    inferred_type, inferred_properties, confidence_score, reasoning = gemini_infer_schema_details_enhanced(
-                        comprehensive_data, url
-                    )
-
-                # Display AI analysis results
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Schema Type", inferred_type)
-                with col2:
-                    st.metric("Confidence Score", f"{confidence_score:.2f}")
-                with col3:
-                    st.metric("Properties Found", len(inferred_properties))
-
-                st.write(f"**AI Reasoning:** {reasoning}")
-
-                # Build and display final schema
-                st.subheader("✅ Generated Schema.org JSON-LD")
-                
-                # Use the enhanced inference results
-                schema_obj = build_schema_obj_from_inferred(inferred_type, inferred_properties, url)
-                jsonld_output = to_jsonld(schema_obj)
-
-                st.code(jsonld_output, language="json")
-
-                # Enhanced download and validation section
-                col1, col2 = st.columns(2)
-                with col1:
-                    if "Error" not in jsonld_output:
-                        st.download_button(
-                            "📥 Download JSON-LD",
-                            data=jsonld_output,
-                            file_name=f"schema-{inferred_type.lower()}.jsonld",
-                            mime="application/ld+json",
-                            key="download_button"
-                        )
-
-                with col2:
-                    st.write("**Quick Validation:**")
-                    # Basic validation checks
-                    try:
-                        parsed_json = json.loads(jsonld_output)
-                        checks = {
-                            "Valid JSON": "✅",
-                            "Has @context": "✅" if "@context" in parsed_json else "❌",
-                            "Has @type": "✅" if "@type" in parsed_json else "❌",
-                            "Has name": "✅" if "name" in parsed_json else "❌",
-                            "Has URL": "✅" if "url" in parsed_json else "❌"
-                        }
-                        for check, status in checks.items():
-                            st.write(f"{status} {check}")
-                    except:
-                        st.write("❌ Invalid JSON structure")
-
-                st.markdown(
-                    """
-                    ---
-                    **🔧 Validation Tools:**
-                    
-                    • [Google Rich Results Test](https://search.google.com/test/rich-results) - Test for Google Search
-                    • [Schema Markup Validator](https://validator.schema.org/) - Official Schema.org validator
-                    • [JSON-LD Playground](https://json-ld.org/playground/) - Test JSON-LD syntax
-                    """
-                )
-
-st.markdown(
-    """
-    ---
-    *Built with ❤️ using Google Gemini, msgspec_schemaorg, and comprehensive web scraping.*
-    
-    **Enhanced Features:**
-    - 🔍 15+ categories of content extraction
-    - 🤖 AI-powered schema type detection with confidence scoring
-    - 📊 Comprehensive analysis dashboard
-    - ✅ Built-in validation and quality checks
-    """
+# Sidebar for template selection
+st.sidebar.header("🎯 Schema Templates")
+template_option = st.sidebar.selectbox(
+    "Choose template type:",
+    ["Auto-detect"] + list(CUSTOM_TEMPLATES.keys())
 )
+
+if template_option != "Auto-detect":
+    st.sidebar.json(CUSTOM_TEMPLATES[template_option]["template"])
+    st.sidebar.caption(CUSTOM_TEMPLATES[template_option]["description"])
+
+# Main input
+url = st.text_input("Enter URL to analyze:", placeholder="https://www.example.com")
+
+if st.button("🚀 Generate Comprehensive Schema", type="primary"):
+    if not url:
+        st.warning("Please enter a URL")
+    elif not url.startswith(("http://", "https://")):
+        st.warning("Please enter a valid URL starting with http:// or https://")
+    else:
+        with st.spinner("Extracting comprehensive content..."):
+            try:
+                comprehensive_data = fetch_comprehensive_content(url)
+                
+                # Display existing schema analysis
+                existing_schema = comprehensive_data['existing_schema']
+                if existing_schema['analysis']['has_schema']:
+                    st.success("✅ Existing Schema Found")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Schema Types", len(existing_schema['analysis']['schema_types']))
+                    with col2:
+                        st.metric("Completeness", f"{existing_schema['analysis']['completeness_score']:.0%}")
+                    with col3:
+                        st.metric("Recommendations", len(existing_schema['analysis']['recommendations']))
+                    
+                    if existing_schema['analysis']['recommendations']:
+                        st.info("💡 **Enhancement Recommendations:** " + "; ".join(existing_schema['analysis']['recommendations']))
+                    
+                    with st.expander("📋 View Existing Schema"):
+                        for i, schema in enumerate(existing_schema['json_ld']):
+                            st.json(schema)
+                else:
+                    st.info("ℹ️ No existing schema found - generating from scratch")
+                
+                # Content analysis summary
+                st.subheader("📊 Content Analysis")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Contact Methods", 
+                             len(comprehensive_data['contact_info']['emails']) + 
+                             len(comprehensive_data['contact_info']['phones']))
+                
+                with col2:
+                    st.metric("Social Links", len(comprehensive_data['social_links']))
+                
+                with col3:
+                    st.metric("Images Found", len(comprehensive_data['media_content']['images']))
+                
+                with col4:
+                    st.metric("Content Type", comprehensive_data['page_structure']['content_type'].title())
+                
+                # Generate comprehensive schema
+                st.subheader("🤖 AI Schema Generation")
+                with st.spinner("Generating comprehensive schema..."):
+                    template_type = template_option if template_option != "Auto-detect" else None
+                    schema_data, confidence, reasoning = generate_comprehensive_schema(
+                        comprehensive_data, url, template_type
+                    )
+                    
+                    if schema_data:
+                        # Display results
+                        col1, col2 = st.columns([2, 1])
+                        
+                        with col1:
+                            st.success(f"✅ Schema Generated - Confidence: {confidence:.0%}")
+                            st.caption(reasoning)
+                        
+                        with col2:
+                            schema_type = schema_data.get('@type', 'Unknown')
+                            st.metric("Schema Type", schema_type)
+                        
+                        # Main schema output
+                        st.subheader("📝 Generated Schema.org JSON-LD")
+                        
+                        # Format and display JSON
+                        formatted_json = json.dumps(schema_data, indent=2, ensure_ascii=False)
+                        st.code(formatted_json, language="json")
+                        
+                        # Analysis of generated schema
+                        st.subheader("🔍 Schema Analysis")
+                        
+                        analysis_cols = st.columns(3)
+                        
+                        with analysis_cols[0]:
+                            st.write("**✅ Validation Checks:**")
+                            checks = {
+                                "Has @context": "@context" in schema_data,
+                                "Has @type": "@type" in schema_data,
+                                "Has name": "name" in schema_data,
+                                "Has URL": "url" in schema_data,
+                                "Has description": "description" in schema_data,
+                                "Has contact info": "contactPoint" in schema_data or "telephone" in schema_data,
+                                "Has social links": "sameAs" in schema_data,
+                                "Has address": "address" in schema_data
+                            }
+                            
+                            for check, passed in checks.items():
+                                st.write(f"{'✅' if passed else '❌'} {check}")
+                        
+                        with analysis_cols[1]:
+                            st.write("**📊 Schema Properties:**")
+                            total_props = len(schema_data) - 2  # Exclude @context and @type
+                            st.metric("Total Properties", total_props)
+                            
+                            # Count nested objects
+                            nested_objects = 0
+                            for value in schema_data.values():
+                                if isinstance(value, dict) and "@type" in value:
+                                    nested_objects += 1
+                                elif isinstance(value, list):
+                                    nested_objects += sum(1 for item in value if isinstance(item, dict) and "@type" in item)
+                            
+                            st.metric("Nested Objects", nested_objects)
+                            
+                            # Array properties
+                            array_props = sum(1 for value in schema_data.values() if isinstance(value, list))
+                            st.metric("Array Properties", array_props)
+                        
+                        with analysis_cols[2]:
+                            st.write("**🎯 Enhancement Features:**")
+                            enhancements = []
+                            
+                            if "contactPoint" in schema_data:
+                                enhancements.append("Multi-department contacts")
+                            if "sameAs" in schema_data and len(schema_data["sameAs"]) > 0:
+                                enhancements.append("Social media integration")
+                            if "address" in schema_data and isinstance(schema_data["address"], dict):
+                                enhancements.append("Structured address")
+                            if "keywords" in schema_data:
+                                enhancements.append("SEO keywords")
+                            if "logo" in schema_data:
+                                enhancements.append("Brand logo")
+                            
+                            for enhancement in enhancements:
+                                st.write(f"✨ {enhancement}")
+                        
+                        # Download and implementation
+                        st.subheader("💾 Implementation")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.download_button(
+                                "📥 Download JSON-LD",
+                                data=formatted_json,
+                                file_name=f"schema-{schema_data.get('@type', 'schema').lower()}.jsonld",
+                                mime="application/ld+json"
+                            )
+                        
+                        with col2:
+                            if st.button("📋 Copy to Clipboard"):
+                                st.write("JSON-LD copied to clipboard!")
+                        
+                        # Implementation instructions
+                        st.info("""
+                        **📖 Implementation Instructions:**
+                        1. Copy the JSON-LD code above
+                        2. Paste it into a `<script type="application/ld+json">` tag in your HTML `<head>`
+                        3. Test with [Google Rich Results Test](https://search.google.com/test/rich-results)
+                        4. Validate with [Schema Markup Validator](https://validator.schema.org/)
+                        """)
+                        
+                        # Comparison with existing schema
+                        if existing_schema['analysis']['has_schema'] and existing_schema['json_ld']:
+                            st.subheader("🔄 Before vs After Comparison")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.write("**📋 Original Schema:**")
+                                original_schema = existing_schema['json_ld'][0]
+                                st.code(json.dumps(original_schema, indent=2), language="json", height=300)
+                                st.caption(f"Properties: {len(original_schema) - 2}")
+                            
+                            with col2:
+                                st.write("**✨ Enhanced Schema:**")
+                                st.code(formatted_json, language="json", height=300)
+                                st.caption(f"Properties: {total_props}")
+                            
+                            # Improvement metrics
+                            improvements = []
+                            if total_props > len(original_schema) - 2:
+                                improvements.append(f"Added {total_props - (len(original_schema) - 2)} properties")
+                            if "contactPoint" in schema_data and "contactPoint" not in original_schema:
+                                improvements.append("Added structured contact information")
+                            if "sameAs" in schema_data and "sameAs" not in original_schema:
+                                improvements.append("Added social media links")
+                            if "address" in schema_data and "address" not in original_schema:
+                                improvements.append("Added structured address")
+                            
+                            if improvements:
+                                st.success("🎉 **Improvements Made:** " + "; ".join(improvements))
+                    
+                    else:
+                        st.error("❌ Failed to generate schema. Please check the URL and try again.")
+                
+            except Exception as e:
+                st.error(f"❌ Error processing URL: {str(e)}")
+                st.info("Please ensure the URL is accessible and contains valid HTML content.")
+
+# Additional features in sidebar
+st.sidebar.markdown("---")
+st.sidebar.header("🛠️ Advanced Features")
+
+if st.sidebar.checkbox("Show Raw Extraction Data"):
+    if 'comprehensive_data' in locals():
+        st.sidebar.json(comprehensive_data)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+**🔗 Validation Tools:**
+- [Google Rich Results Test](https://search.google.com/test/rich-results)
+- [Schema Markup Validator](https://validator.schema.org/)
+- [JSON-LD Playground](https://json-ld.org/playground/)
+
+**📚 Resources:**
+- [Schema.org Documentation](https://schema.org/)
+- [Google Search Central](https://developers.google.com/search/docs/appearance/structured-data)
+""")
+
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: #666;'>
+    <p>🚀 <strong>Comprehensive Schema.org Generator</strong> | Built with Google Gemini AI</p>
+    <p>Generate production-ready, comprehensive JSON-LD markup with multi-department contacts, social integration, and enhanced properties.</p>
+</div>
+""", unsafe_allow_html=True)
