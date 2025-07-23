@@ -5,10 +5,9 @@ import google.generativeai as genai
 import json
 import re
 from urllib.parse import urljoin, urlparse
-from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-# Import Schema.org models
+# Import Schema.org models (assuming you have this package)
 from msgspec_schemaorg.models import (
     Article, WebPage, Product, Event, Organization, Person, Place,
     CreativeWork, Thing, LocalBusiness, Service, Recipe, Review,
@@ -17,11 +16,10 @@ from msgspec_schemaorg.models import (
 )
 from msgspec_schemaorg.utils import parse_iso8601
 
-# Configuration
+# Configure your Gemini API key here or in Streamlit secrets
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Page type options
 PAGE_TYPES = {
     "Homepage": "The main page of a website",
     "About Us": "Company information and background",
@@ -40,7 +38,6 @@ PAGE_TYPES = {
     "Team/People": "Team member or individual profiles"
 }
 
-# Schema templates
 COMPREHENSIVE_TEMPLATES = {
     "Article": {
         "template": {
@@ -82,10 +79,8 @@ COMPREHENSIVE_TEMPLATES = {
         },
         "description": "Comprehensive organization schema with enhanced properties"
     },
-    # ... add other templates as needed ...
+    # Other templates can be added here as needed
 }
-
-# Helper functions
 
 def extract_canonical_url(soup: BeautifulSoup) -> Optional[str]:
     link = soup.select_one("link[rel=canonical]")
@@ -119,10 +114,48 @@ def extract_social_metadata(soup: BeautifulSoup) -> Dict[str, Dict[str, str]]:
         out["twitter"][name] = tag.get("content", "")
     return out
 
+def extract_existing_schema(soup: BeautifulSoup) -> Dict[str, Any]:
+    existing = {'json_ld': [], 'microdata': [], 'analysis': {
+        'has_schema': False, 'schema_types': [], 'completeness_score': 0, 'recommendations': []
+    }}
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string)
+            existing['json_ld'].append(data)
+            existing['analysis']['has_schema'] = True
+            if isinstance(data, dict) and '@type' in data:
+                existing['analysis']['schema_types'].append(data['@type'])
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and '@type' in item:
+                        existing['analysis']['schema_types'].append(item['@type'])
+        except Exception:
+            pass
+    for item in soup.find_all(attrs={"itemscope": True}):
+        props = {}
+        for p in item.find_all(attrs={"itemprop": True}):
+            name = p.get("itemprop")
+            val = p.get("content") or p.get_text(strip=True)
+            if name and val:
+                props[name] = val
+        if props:
+            existing['microdata'].append({'type': item.get("itemtype", ""), 'properties': props})
+            existing['analysis']['has_schema'] = True
+    if existing['json_ld']:
+        schema = existing['json_ld'][0]
+        req = ['name', 'url', 'description']
+        present = [p for p in req if p in schema]
+        existing['analysis']['completeness_score'] = len(present) / len(req)
+        if schema.get('@type') == 'Organization':
+            rec = existing['analysis']['recommendations']
+            for f in ['contactPoint','sameAs','address','subjectOf','knowsAbout','location']:
+                if f not in schema:
+                    rec.append(f"Add {f}")
+    return existing
+
 def extract_comprehensive_contact_info(soup: BeautifulSoup) -> Dict[str, Any]:
     info = {"emails": [], "phones": [], "contact_points": []}
     text = soup.get_text()
-    # emails
     for a in soup.select('a[href^="mailto:"]'):
         email = a["href"].split("mailto:")[1].split("?")[0]
         if email not in info["emails"]:
@@ -130,7 +163,6 @@ def extract_comprehensive_contact_info(soup: BeautifulSoup) -> Dict[str, Any]:
     for e in re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', text):
         if e not in info["emails"]:
             info["emails"].append(e)
-    # phones
     for a in soup.select('a[href^="tel:"]'):
         num = a["href"].split("tel:")[1]
         if num not in info["phones"]:
@@ -138,7 +170,6 @@ def extract_comprehensive_contact_info(soup: BeautifulSoup) -> Dict[str, Any]:
     for m in re.findall(r'\+?\d[\d\-\s]{7,}\d', text):
         if m not in info["phones"]:
             info["phones"].append(m)
-    # contactPoints
     for p in info["phones"]:
         info["contact_points"].append({"@type": "ContactPoint", "telephone": p, "contactType": "customer service"})
     return info
@@ -234,7 +265,6 @@ def extract_entity_data(soup: BeautifulSoup, url: str) -> Dict[str, Any]:
         kws = [x.strip() for x in meta["content"].split(",")]
     return {"expertise_areas": areas, "industry_keywords": kws, "wiki_topics": wiki}
 
-# Render page to screenshots
 def html_to_images(url: str, html: str, num_screenshots: int = 3) -> List[str]:
     screenshots = []
     domain = urlparse(url).netloc.replace(".", "_")
@@ -359,14 +389,17 @@ def enhance_generated_schema(schema: dict, data: dict, url: str) -> dict:
     schema["url"] = url
     if "contactPoint" in schema and isinstance(schema["contactPoint"], list):
         schema["contactPoint"] = schema["contactPoint"][:1]
-    # additional enhancements omitted for brevity
+    # other enhancements can be added here
     return schema
 
 def suggest_schema_type_from_page_type(page_type: str) -> str:
     mapping = {
-        "Homepage": "Organization", "About Us": "Organization",
-        "Contact Us": "Organization", "Product Page": "Product",
-        "Blog Post": "Article", "FAQ Page": "FAQPage",
+        "Homepage": "Organization",
+        "About Us": "Organization",
+        "Contact Us": "Organization",
+        "Product Page": "Product",
+        "Blog Post": "Article",
+        "FAQ Page": "FAQPage",
         "Recipe Page": "Recipe"
     }
     return mapping.get(page_type, "WebPage")
