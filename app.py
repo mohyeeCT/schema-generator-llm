@@ -1621,7 +1621,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                     final_template_type = template_option if template_option != "Auto-detect" else None
                     final_page_type_param = page_type_option if page_type_option != "Auto-detect" else None
                     
-                    schema_data, confidence, reasoning = generate_comprehensive_schema(
+                    schema_data, confidence, reasoning = generate_comprehensive_schema_simple(
                         comprehensive_data, url, final_template_type, final_page_type_param
                     )
                     
