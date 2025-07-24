@@ -1211,119 +1211,226 @@ Provide ONLY valid JSON-LD markup. No explanations, no markdown formatting, just
 
     return prompt
 
-def generate_comprehensive_schema(comprehensive_data: dict, url: str, template_type: str = None, page_type: str = None):
-    """Generate comprehensive schema using enhanced Gemini analysis"""
+def generate_comprehensive_schema_simple(comprehensive_data: dict, url: str, template_type: str = None, page_type: str = None):
+    """Simplified schema generation with better error handling"""
     
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = create_comprehensive_schema_prompt(comprehensive_data, url, template_type, page_type)
+        # Start with a base template
+        base_schema = get_base_schema_template(comprehensive_data, url, template_type, page_type)
         
-        response = model.generate_content(prompt)
+        # Enhance with AI if possible, but fallback to template if AI fails
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = create_simple_enhancement_prompt(comprehensive_data, url, base_schema)
+            
+            response = model.generate_content(prompt)
+            
+            if response.text:
+                enhanced_schema = parse_gemini_response_safely(response.text, base_schema)
+                if enhanced_schema:
+                    return enhanced_schema, 0.95, "AI-enhanced comprehensive schema generated"
+        except Exception as ai_error:
+            st.warning(f"AI enhancement failed: {ai_error}. Using template-based generation.")
         
-        if not response.text:
-            raise ValueError("Gemini returned an empty response")
+        # Fallback to template-based generation
+        enhanced_schema = enhance_template_with_data(base_schema, comprehensive_data, url)
+        return enhanced_schema, 0.80, "Template-based comprehensive schema generated"
         
-        # Clean response
-        raw_json_str = response.text.strip()
-        
-        # Remove markdown formatting
-        if raw_json_str.startswith("```json"):
-            json_str = raw_json_str[len("```json"):].strip()
-            if json_str.endswith("```"):
-                json_str = json_str[:-len("```")].strip()
-        elif raw_json_str.startswith("```"):
-            json_str = raw_json_str[3:].strip()
-            if json_str.endswith("```"):
-                json_str = json_str[:-3].strip()
-        else:
-            json_str = raw_json_str
-        
-        # Parse and validate JSON
-        parsed_schema = json.loads(json_str)
-        
-        # Ensure required fields
-        if "@context" not in parsed_schema:
-            parsed_schema["@context"] = "https://schema.org"
-        
-        # Post-process to enhance based on extracted data
-        parsed_schema = enhance_generated_schema(parsed_schema, comprehensive_data, url)
-        
-        return parsed_schema, 0.95, "Comprehensive schema generated successfully"
-        
-    except json.JSONDecodeError as e:
-        st.error(f"Failed to parse Gemini JSON output: {e}")
-        return None, 0.0, f"JSON parsing failed: {str(e)}"
     except Exception as e:
-        st.error(f"Error generating schema: {e}")
+        st.error(f"Schema generation failed: {e}")
         return None, 0.0, f"Generation failed: {str(e)}"
 
-def enhance_generated_schema(schema: dict, comprehensive_data: dict, url: str) -> dict:
-    """Post-process generated schema to ensure completeness"""
+def get_base_schema_template(comprehensive_data: dict, url: str, template_type: str = None, page_type: str = None):
+    """Get appropriate base template based on page type and content"""
     
-    # Ensure URL is set correctly
-    schema["url"] = url
+    detected_page_type = comprehensive_data.get('page_type', 'Homepage')
+    final_page_type = page_type if page_type != "Auto-detect" else detected_page_type
     
-    # Enhance contact points if they exist but are incomplete
-    if "contactPoint" in schema and isinstance(schema["contactPoint"], list):
-        contact_info = comprehensive_data['contact_info']
+    # Determine best schema type
+    if template_type and template_type != "Auto-detect":
+        schema_type = template_type
+    else:
+        schema_type = suggest_schema_type_from_page_type(final_page_type)
+    
+    # Get base template
+    if schema_type in COMPREHENSIVE_TEMPLATES:
+        base_schema = COMPREHENSIVE_TEMPLATES[schema_type]["template"].copy()
+    else:
+        base_schema = COMPREHENSIVE_TEMPLATES["Organization"]["template"].copy()
+    
+    return base_schema
+
+def enhance_template_with_data(base_schema: dict, comprehensive_data: dict, url: str):
+    """Enhance template with extracted data without AI"""
+    
+    basic_meta = comprehensive_data['basic_metadata']
+    contact_info = comprehensive_data['contact_info']
+    business_info = comprehensive_data['business_info']
+    social_links = comprehensive_data['social_links']
+    media_content = comprehensive_data['media_content']
+    entity_data = comprehensive_data['entity_data']
+    
+    # Fill in basic information
+    base_schema["url"] = url
+    base_schema["name"] = business_info.get('name') or basic_meta['title']
+    base_schema["description"] = basic_meta['description']
+    
+    # Add logo and image
+    if media_content['logo']:
+        base_schema["logo"] = media_content['logo']
+    if media_content['featured_image']:
+        base_schema["image"] = media_content['featured_image']
+    
+    # Add contact points for organizations
+    if base_schema.get("@type") == "Organization" and contact_info['emails']:
+        contact_points = []
         
-        # Add missing phones to contact points
-        existing_phones = []
-        for cp in schema["contactPoint"]:
-            if "telephone" in cp:
-                existing_phones.append(cp["telephone"])
+        # Add email-based contact points
+        for i, email in enumerate(contact_info['emails'][:3]):
+            contact_type = "customer service"
+            if "sales" in email.lower():
+                contact_type = "sales"
+            elif "support" in email.lower():
+                contact_type = "technical support"
+            
+            contact_points.append({
+                "@type": "ContactPoint",
+                "contactType": contact_type,
+                "email": email,
+                "areaServed": "US",
+                "availableLanguage": "English"
+            })
         
-        # Add any missing phones as additional contact points
-        for phone in contact_info['phones']:
-            if phone not in str(existing_phones):
-                schema["contactPoint"].append({
+        # Add phone-based contact points
+        for i, phone in enumerate(contact_info['phones'][:3]):
+            if i < len(contact_points):
+                contact_points[i]["telephone"] = phone
+            else:
+                contact_points.append({
                     "@type": "ContactPoint",
                     "contactType": "customer service",
                     "telephone": phone,
                     "areaServed": "US",
                     "availableLanguage": "English"
                 })
-    
-    # Ensure proper logo URL (avoid tracking pixels)
-    if "logo" in schema:
-        logo_url = schema["logo"]
-        if any(tracker in logo_url.lower() for tracker in ['webtraxs', 'analytics', 'tracking']):
-            media_content = comprehensive_data['media_content']
-            if media_content['logo']:
-                schema["logo"] = media_content['logo']
-    
-    # Enhance keywords if missing or sparse
-    if schema.get("@type") == "Organization":
-        entity_data = comprehensive_data['entity_data']
-        basic_meta = comprehensive_data['basic_metadata']
         
-        current_keywords = schema.get("keywords", [])
-        if len(current_keywords) < 5:
-            # Add from entity data and meta keywords
-            all_keywords = set(current_keywords)
-            all_keywords.update(entity_data['industry_keywords'][:15])
-            all_keywords.update(basic_meta['keywords'][:10])
-            schema["keywords"] = list(all_keywords)
+        base_schema["contactPoint"] = contact_points
     
-    # Add subjectOf with Wikipedia links if missing
-    if schema.get("@type") == "Organization" and "subjectOf" not in schema:
-        entity_data = comprehensive_data['entity_data']
-        if entity_data['wiki_topics']:
-            schema["subjectOf"] = []
-            for topic in entity_data['wiki_topics'][:4]:
-                schema["subjectOf"].append({
-                    "@type": "CreativeWork",
-                    "url": f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}",
-                    "description": f"{topic} is relevant to the business focus and expertise areas."
-                })
+    # Add social links
+    if social_links:
+        base_schema["sameAs"] = social_links[:6]  # Limit to 6 social links
     
-    # Ensure knowsAbout is populated
-    if schema.get("@type") == "Organization" and "knowsAbout" not in schema:
-        entity_data = comprehensive_data['entity_data']
-        if entity_data['expertise_areas']:
-            schema["knowsAbout"] = entity_data['expertise_areas']
+    # Add address for organizations
+    if base_schema.get("@type") == "Organization" and business_info['address']:
+        address = {"@type": "PostalAddress"}
+        
+        if 'street' in business_info['address']:
+            address["streetAddress"] = business_info['address']['street']
+        if 'city' in business_info['address']:
+            address["addressLocality"] = business_info['address']['city']
+        if 'state' in business_info['address']:
+            address["addressRegion"] = business_info['address']['state']
+        if 'postal_code' in business_info['address']:
+            address["postalCode"] = business_info['address']['postal_code']
+        if 'country' in business_info['address']:
+            address["addressCountry"] = business_info['address']['country']
+        
+        if len(address) > 1:  # More than just @type
+            base_schema["address"] = address
     
-    return schema
+    # Add keywords
+    all_keywords = set()
+    if basic_meta['keywords']:
+        all_keywords.update(basic_meta['keywords'])
+    if entity_data['industry_keywords']:
+        all_keywords.update(entity_data['industry_keywords'][:10])
+    
+    if all_keywords:
+        base_schema["keywords"] = list(all_keywords)[:15]
+    
+    # Add expertise areas for organizations
+    if base_schema.get("@type") == "Organization" and entity_data['expertise_areas']:
+        base_schema["knowsAbout"] = entity_data['expertise_areas']
+    
+    # Add Wikipedia subjects for organizations
+    if base_schema.get("@type") == "Organization" and entity_data['wiki_topics']:
+        subject_of = []
+        for topic in entity_data['wiki_topics'][:4]:
+            subject_of.append({
+                "@type": "CreativeWork",
+                "url": f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}",
+                "description": f"{topic} represents a key area of expertise and knowledge."
+            })
+        base_schema["subjectOf"] = subject_of
+    
+    # Clean up empty values
+    cleaned_schema = {k: v for k, v in base_schema.items() if v not in ["", None, [], {}]}
+    
+    return cleaned_schema
+
+def parse_gemini_response_safely(response_text: str, fallback_schema: dict):
+    """Safely parse Gemini response with multiple fallback strategies"""
+    
+    try:
+        # Try the enhanced extraction first
+        json_str = extract_json_from_text(response_text)
+        return json.loads(json_str)
+    except:
+        pass
+    
+    try:
+        # Try fallback extraction
+        json_str = extract_json_fallback(response_text)
+        if json_str:
+            return json.loads(json_str)
+    except:
+        pass
+    
+    try:
+        # Try simple cleaning
+        cleaned = response_text.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+        return json.loads(cleaned)
+    except:
+        pass
+    
+    # If all parsing fails, return the fallback
+    return fallback_schema
+
+def create_simple_enhancement_prompt(comprehensive_data: dict, url: str, base_schema: dict) -> str:
+    """Create a simpler prompt focused on enhancement rather than full generation"""
+    
+    basic_meta = comprehensive_data['basic_metadata']
+    contact_info = comprehensive_data['contact_info']
+    social_links = comprehensive_data['social_links']
+    
+    prompt = f"""Enhance this Schema.org JSON-LD with the provided data. Return ONLY valid JSON.
+
+BASE SCHEMA:
+{json.dumps(base_schema, indent=2)}
+
+ENHANCEMENT DATA:
+- URL: {url}
+- Title: {basic_meta['title']}
+- Description: {basic_meta['description']}
+- Emails: {', '.join(contact_info['emails'][:2])}
+- Phones: {', '.join(contact_info['phones'][:2])}
+- Social Links: {', '.join(social_links[:3])}
+
+INSTRUCTIONS:
+1. Enhance the base schema with the provided data
+2. Add multiple contactPoint objects if emails/phones available
+3. Add sameAs array with social links
+4. Fill in name, description, url fields
+5. Return ONLY the enhanced JSON - no explanations
+
+ENHANCED SCHEMA:"""
+
+    return prompt
 
 def suggest_schema_type_from_page_type(page_type: str) -> str:
     """Suggest appropriate schema type based on detected page type"""
