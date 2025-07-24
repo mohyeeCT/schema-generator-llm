@@ -1,6 +1,3 @@
-# File 1/5: Imports and Configuration
-# Lines: 1-150 approximately
-# Status: COMPLETE - Contains all imports, configuration, and page type definitions
 
 import streamlit as st
 import requests
@@ -175,12 +172,7 @@ COMPREHENSIVE_TEMPLATES = {
     }
 }
 
-# FILE 1/5 COMPLETE - Next: File 2/5 contains remaining templates
-# File 2/5: Schema Templates Continuation
-# Lines: 151-300 approximately  
-# Status: COMPLETE - Contains remaining schema templates
 
-# Continuing COMPREHENSIVE_TEMPLATES from File 1/5
 COMPREHENSIVE_TEMPLATES.update({
     "Restaurant": {
         "template": {
@@ -506,10 +498,6 @@ COMPREHENSIVE_TEMPLATES.update({
     }
 })
 
-# FILE 2/5 COMPLETE - Next: File 3/5 contains content extraction functions
-# File 3/5: Content Extraction Functions
-# Lines: 301-600 approximately
-# Status: COMPLETE - Contains all content extraction and analysis functions
 
 # --- Page Type Detection Functions ---
 
@@ -850,10 +838,6 @@ def extract_comprehensive_contact_info(soup: BeautifulSoup) -> Dict[str, Any]:
     
     return contact_info
 
-# FILE 3/5 COMPLETE - Next: File 4/5 contains remaining extraction functions and AI generation
-# File 4/5: AI Generation and Processing Functions
-# Lines: 601-900 approximately
-# Status: COMPLETE - Contains remaining extraction functions and AI generation
 
 def extract_comprehensive_business_info(soup: BeautifulSoup) -> Dict[str, Any]:
     """Extract comprehensive business information"""
@@ -1454,10 +1438,6 @@ def suggest_schema_type_from_page_type(page_type: str) -> str:
     
     return schema_mapping.get(page_type, "WebPage")
 
-# FILE 4/5 COMPLETE - Next: File 5/5 contains the complete Streamlit UI
-# File 5/5: Complete Streamlit UI
-# Lines: 901-1200+ approximately
-# Status: COMPLETE - Contains the complete Streamlit user interface
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Comprehensive Schema.org Generator", page_icon="🔗", layout="wide")
@@ -1847,27 +1827,3 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# FILE 5/5 COMPLETE 
-# TOTAL FILES: 5/5 - ALL COMPLETE
-# 
-# ASSEMBLY INSTRUCTIONS:
-# 1. Combine all 5 files in order (File 1 + File 2 + File 3 + File 4 + File 5)
-# 2. Remove the "# FILE X/5 COMPLETE" comments
-# 3. Remove any duplicate COMPREHENSIVE_TEMPLATES references
-# 4. Save as app.py
-# 
-# VERIFICATION:
-# - Total estimated lines: ~1200+
-# - All functions included and complete
-# - No truncated code
-# - Ready for deployment with existing requirements.txt
-# 
-# FEATURES CONFIRMED COMPLETE:
-# ✅ 15+ Schema types including EntitySchema
-# ✅ Page type detection (15 types)
-# ✅ Existing schema enhancement
-# ✅ Multi-department contact points
-# ✅ Wikipedia integration
-# ✅ Entity intelligence
-# ✅ Quality scoring system
-# ✅ Comprehensive UI with validation
