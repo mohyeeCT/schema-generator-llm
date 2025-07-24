@@ -742,7 +742,7 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                     st.info("ℹ️ No existing schema found - generating from scratch")
                 
                 # Content analysis
-                st.subheader("📊 Content Analysis")
+                st.subheader("Content Analysis")
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
@@ -799,14 +799,14 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                             st.metric("Generated Schema Type", schema_type)
                         
                         # Main schema output
-                        st.subheader("📝 Generated Schema.org JSON-LD")
+                        st.subheader("Generated Schema.org JSON-LD")
                         
                         # Format and display JSON
                         formatted_json = json.dumps(schema_data, indent=2, ensure_ascii=False)
                         st.code(formatted_json, language="json")
                         
                         # Schema quality analysis
-                        st.subheader("🔍 Schema Quality Analysis")
+                        st.subheader("Schema Quality Analysis")
                         
                         analysis_cols = st.columns(4)
                         
@@ -824,7 +824,7 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                                 st.write(f"{'✅' if passed else '❌'} {check}")
                         
                         with analysis_cols[1]:
-                            st.write("**📞 Contact Features:**")
+                            st.write("**Contact Features:**")
                             contact_checks = {
                                 "Multi-department contacts": "contactPoint" in schema_data and len(schema_data.get("contactPoint", [])) > 1,
                                 "Structured address": "address" in schema_data and isinstance(schema_data.get("address"), dict),
@@ -848,7 +848,7 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                                 st.write(f"{'✅' if passed else '❌'} {check}")
                         
                         with analysis_cols[3]:
-                            st.write("**📊 Schema Stats:**")
+                            st.write("**Schema Stats:**")
                             total_props = len(schema_data) - 2  # Exclude @context and @type
                             st.metric("Total Properties", total_props)
                             
@@ -867,7 +867,7 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                             st.metric("Array Properties", array_props)
                         
                         # Enhancement features showcase
-                        st.subheader("✨ Enhancement Features")
+                        st.subheader("Enhancement Features")
                         
                         enhancements = []
                         if "contactPoint" in schema_data and len(schema_data["contactPoint"]) > 1:
@@ -894,32 +894,32 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                             st.success(enhancement)
                         
                         if not enhancements:
-                            st.info("💡 Consider using Organization template for maximum enhancement features")
+                            st.info("Consider using Organization template for maximum enhancement features")
                         
                         # Download and implementation
-                        st.subheader("💾 Implementation")
+                        st.subheader("Implementation")
                         
                         col1, col2, col3 = st.columns(3)
                         
                         with col1:
                             st.download_button(
-                                "📥 Download JSON-LD",
+                                "Download JSON-LD",
                                 data=formatted_json,
                                 file_name=f"schema-{schema_data.get('@type', 'schema').lower()}.jsonld",
                                 mime="application/ld+json"
                             )
                         
                         with col2:
-                            if st.button("📋 Copy Schema"):
+                            if st.button("Copy Schema"):
                                 st.success("Ready to copy!")
                         
                         with col3:
-                            if st.button("🔄 Regenerate"):
+                            if st.button("Regenerate"):
                                 st.experimental_rerun()
                         
                         # Implementation guide
                         st.info("""
-                        **📖 Implementation Guide:**
+                        **Implementation Guide:**
                         
                         1. **Copy the JSON-LD** code above
                         2. **Paste into HTML** `<head>` section:
