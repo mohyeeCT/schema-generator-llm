@@ -678,18 +678,18 @@ Return ONLY valid JSON-LD markup. Start with {{ and end with }}. No explanations
 # --- Streamlit UI ---
 st.set_page_config(page_title="Comprehensive Schema.org Generator", page_icon="🔗", layout="wide")
 
-st.title("🔗 Comprehensive Schema.org JSON-LD Generator")
+st.title(" Comprehensive Schema.org JSON-LD Generator")
 st.markdown("""
 Generate production-ready, comprehensive Schema.org markup with:
-- **🎯 Page Type Detection** - Automatic or manual page type selection
-- **📋 Expanded Schema Templates** - 15+ schema types including EntitySchema
-- **🔍 Existing Schema Enhancement** - Detect and improve current markup
-- **🏢 Multi-department Contacts** - Like the Sugatsune reference example
-- **🌐 Entity-focused Markup** - With Wikipedia links and knowledge areas
+- ** Page Type Detection** - Automatic or manual page type selection
+- ** Expanded Schema Templates** - 15+ schema types including EntitySchema
+- ** Existing Schema Enhancement** - Detect and improve current markup
+- ** Multi-department Contacts** - Like the Sugatsune reference example
+- ** Entity-focused Markup** - With Wikipedia links and knowledge areas
 """)
 
 # Sidebar Configuration
-st.sidebar.header("🎯 Configuration")
+st.sidebar.header(" Configuration")
 
 # Page Type Selection
 page_type_option = st.sidebar.selectbox(
@@ -706,13 +706,13 @@ template_option = st.sidebar.selectbox(
 )
 
 if template_option != "Auto-detect":
-    with st.sidebar.expander("📋 View Template"):
+    with st.sidebar.expander(" View Template"):
         st.json(COMPREHENSIVE_TEMPLATES[template_option]["template"])
 
 # Main Input
 url = st.text_input("Enter URL to analyze:", placeholder="https://www.example.com")
 
-if st.button("🚀 Generate Comprehensive Schema", type="primary"):
+if st.button(" Generate Comprehensive Schema", type="primary"):
     if not url:
         st.warning("Please enter a URL")
     elif not url.startswith(("http://", "https://")):
@@ -737,7 +737,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                 # Display existing schema analysis
                 existing_schema = comprehensive_data['existing_schema']
                 if existing_schema['analysis']['has_schema']:
-                    st.success("✅ Existing Schema Found")
+                    st.success(" Existing Schema Found")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.metric("Schema Types", len(existing_schema['analysis']['schema_types']))
@@ -771,11 +771,11 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                 # Entity data insights
                 entity_data = comprehensive_data['entity_data']
                 if entity_data['expertise_areas']:
-                    st.subheader("🧠 Entity Intelligence")
+                    st.subheader(" Entity Intelligence")
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.write("**🎯 Detected Expertise:**")
+                        st.write("** Detected Expertise:**")
                         for area in entity_data['expertise_areas']:
                             st.write(f"• {area}")
                     
@@ -785,7 +785,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                             st.write(", ".join(entity_data['industry_keywords'][:8]))
                 
                 # Generate schema
-                st.subheader("🤖 AI Schema Generation")
+                st.subheader(" AI Schema Generation")
                 with st.spinner("Generating comprehensive schema..."):
                     final_template_type = template_option if template_option != "Auto-detect" else None
                     final_page_type_param = page_type_option if page_type_option != "Auto-detect" else None
@@ -799,7 +799,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                         col1, col2 = st.columns([2, 1])
                         
                         with col1:
-                            st.success(f"✅ Schema Generated - Confidence: {confidence:.0%}")
+                            st.success(f" Schema Generated - Confidence: {confidence:.0%}")
                             st.caption(reasoning)
                         
                         with col2:
@@ -819,7 +819,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                         analysis_cols = st.columns(4)
                         
                         with analysis_cols[0]:
-                            st.write("**✅ Core Validation:**")
+                            st.write("**Core Validation:**")
                             core_checks = {
                                 "Has @context": "@context" in schema_data,
                                 "Has @type": "@type" in schema_data,
@@ -844,7 +844,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                                 st.write(f"{'✅' if passed else '❌'} {check}")
                         
                         with analysis_cols[2]:
-                            st.write("**🧠 Entity Features:**")
+                            st.write("**Entity Features:**")
                             entity_checks = {
                                 "Knowledge areas": "knowsAbout" in schema_data,
                                 "Subject expertise": "subjectOf" in schema_data,
@@ -880,23 +880,23 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                         enhancements = []
                         if "contactPoint" in schema_data and len(schema_data["contactPoint"]) > 1:
                             dept_count = len(schema_data["contactPoint"])
-                            enhancements.append(f"🏢 **Multi-department Contacts:** {dept_count} departments")
+                            enhancements.append(f" **Multi-department Contacts:** {dept_count} departments")
                         
                         if "sameAs" in schema_data and len(schema_data["sameAs"]) > 0:
                             social_count = len(schema_data["sameAs"])
-                            enhancements.append(f"📱 **Social Media Integration:** {social_count} platforms")
+                            enhancements.append(f" **Social Media Integration:** {social_count} platforms")
                         
                         if "subjectOf" in schema_data:
                             wiki_count = len(schema_data["subjectOf"])
-                            enhancements.append(f"📚 **Wikipedia Integration:** {wiki_count} topic links")
+                            enhancements.append(f" **Wikipedia Integration:** {wiki_count} topic links")
                         
                         if "knowsAbout" in schema_data:
                             expertise_count = len(schema_data["knowsAbout"])
-                            enhancements.append(f"🎯 **Expertise Areas:** {expertise_count} knowledge domains")
+                            enhancements.append(f" **Expertise Areas:** {expertise_count} knowledge domains")
                         
                         if "keywords" in schema_data and len(schema_data["keywords"]) > 5:
                             keyword_count = len(schema_data["keywords"])
-                            enhancements.append(f"🔑 **Rich Keywords:** {keyword_count} terms")
+                            enhancements.append(f" **Rich Keywords:** {keyword_count} terms")
                         
                         for enhancement in enhancements:
                             st.success(enhancement)
@@ -943,7 +943,7 @@ if st.button("🚀 Generate Comprehensive Schema", type="primary"):
                         """)
                         
                         # Quality score
-                        st.subheader("🎯 Schema Quality Score")
+                        st.subheader("Schema Quality Score")
                         
                         quality_score = 0
                         
@@ -1006,7 +1006,7 @@ if st.sidebar.checkbox("Show Entity Data"):
     if 'comprehensive_data' in locals():
         entity_data = comprehensive_data.get('entity_data', {})
         if entity_data:
-            st.sidebar.write("**🧠 Detected Entity Data:**")
+            st.sidebar.write("**Detected Entity Data:**")
             if entity_data['expertise_areas']:
                 st.sidebar.write("**Areas:** " + ", ".join(entity_data['expertise_areas']))
 
@@ -1018,12 +1018,12 @@ if st.sidebar.checkbox("Show Raw Data"):
 # Footer with validation tools
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-**🔗 Validation & Tools:**
+**Validation & Tools:**
 - [Google Rich Results Test](https://search.google.com/test/rich-results)
 - [Schema Markup Validator](https://validator.schema.org/)
 - [JSON-LD Playground](https://json-ld.org/playground/)
 
-**📚 Documentation:**
+**Documentation:**
 - [Schema.org Types](https://schema.org/docs/schemas.html)
 - [Google Search Central](https://developers.google.com/search/docs/appearance/structured-data)
 """)
@@ -1032,7 +1032,7 @@ st.sidebar.markdown("""
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    <p><strong>🚀 Comprehensive Schema.org Generator v2.0</strong></p>
+    <p><strong>Comprehensive Schema.org Generator v2.0</strong></p>
     <p>Enhanced with Entity Intelligence, Multi-department Contacts & Wikipedia Integration</p>
     <p>Powered by Google Gemini AI • Built for Production-Ready Schema Markup</p>
 </div>
