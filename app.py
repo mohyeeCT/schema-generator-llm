@@ -917,22 +917,8 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                             if st.button("Regenerate"):
                                 st.experimental_rerun()
                         
-                        # Implementation guide
-                        st.info("""
-                        **Implementation Guide:**
-                        
-                        1. **Copy the JSON-LD** code above
-                        2. **Paste into HTML** `<head>` section:
-                           ```html
-                           <script type="application/ld+json">
-                           {your-schema-here}
-                           </script>
-                           ```
-                        3. **Test & Validate:**
-                           - [Google Rich Results Test](https://search.google.com/test/rich-results)
-                           - [Schema Markup Validator](https://validator.schema.org/)
-                        4. **Monitor Performance** in Google Search Console
-                        """)
+                        # Download and implementation helpers
+                        # Download and copy buttons provided above
                         
                         # Quality score
                         st.subheader("Schema Quality Score")
@@ -967,8 +953,7 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
                         col1, col2, col3 = st.columns(3)
                         
                         with col1:
-                            score_color = "🟢" if quality_score >= 80 else "🟡" if quality_score >= 60 else "🔴"
-                            st.metric("Quality Score", f"{score_color} {quality_score}/100")
+                            st.metric("Quality Score", f"{quality_score}/100")
                         
                         with col2:
                             if quality_score >= 80:
