@@ -680,12 +680,7 @@ st.set_page_config(page_title="Comprehensive Schema.org Generator", page_icon="ð
 
 st.title(" Comprehensive Schema.org JSON-LD Generator")
 st.markdown("""
-Generate production-ready, comprehensive Schema.org markup with:
-- ** Page Type Detection** - Automatic or manual page type selection
-- ** Expanded Schema Templates** - 15+ schema types including EntitySchema
-- ** Existing Schema Enhancement** - Detect and improve current markup
-- ** Multi-department Contacts** - Like the Sugatsune reference example
-- ** Entity-focused Markup** - With Wikipedia links and knowledge areas
+Generate comprehensive Schema.org markup with just a few clicks.
 """)
 
 # Sidebar Configuration
@@ -1032,8 +1027,6 @@ st.sidebar.markdown("""
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    <p><strong>Comprehensive Schema.org Generator v2.0</strong></p>
-    <p>Enhanced with Entity Intelligence, Multi-department Contacts & Wikipedia Integration</p>
-    <p>Powered by Google Gemini AI â€¢ Built for Production-Ready Schema Markup</p>
+    <p><strong>Schema.org Generator</strong></p>
 </div>
 """, unsafe_allow_html=True)
