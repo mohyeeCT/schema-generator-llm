@@ -679,9 +679,6 @@ Return ONLY valid JSON-LD markup. Start with {{ and end with }}. No explanations
 st.set_page_config(page_title="Comprehensive Schema.org Generator", page_icon="🔗", layout="wide")
 
 st.title(" Comprehensive Schema.org JSON-LD Generator")
-st.markdown("""
-Generate comprehensive Schema.org markup with just a few clicks.
-""")
 
 # Sidebar Configuration
 st.sidebar.header(" Configuration")
@@ -1010,23 +1007,3 @@ if st.sidebar.checkbox("Show Raw Data"):
         with st.sidebar.expander("Raw Extraction Data"):
             st.sidebar.json(comprehensive_data)
 
-# Footer with validation tools
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-**Validation & Tools:**
-- [Google Rich Results Test](https://search.google.com/test/rich-results)
-- [Schema Markup Validator](https://validator.schema.org/)
-- [JSON-LD Playground](https://json-ld.org/playground/)
-
-**Documentation:**
-- [Schema.org Types](https://schema.org/docs/schemas.html)
-- [Google Search Central](https://developers.google.com/search/docs/appearance/structured-data)
-""")
-
-# Main footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; padding: 20px;'>
-    <p><strong>Schema.org Generator</strong></p>
-</div>
-""", unsafe_allow_html=True)
