@@ -1349,8 +1349,61 @@ def enhance_template_with_data(base_schema: dict, comprehensive_data: dict, url:
     
     # Clean up empty values
     cleaned_schema = {k: v for k, v in base_schema.items() if v not in ["", None, [], {}]}
-    
+
     return cleaned_schema
+
+
+def extract_json_from_text(text: str) -> str:
+    """Extract a JSON string from Gemini response text."""
+
+    # Remove common code fences
+    cleaned = text.strip()
+    fence = re.search(r"```(?:json)?(.*?)```", cleaned, re.DOTALL | re.IGNORECASE)
+    if fence:
+        cleaned = fence.group(1).strip()
+
+    # If the whole cleaned text is JSON, return it
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except Exception:
+        pass
+
+    # Otherwise search for first JSON object or array within the text
+    match = re.search(r"({.*})", cleaned, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    match = re.search(r"(\[.*\])", cleaned, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    raise ValueError("No JSON content found")
+
+
+def extract_json_fallback(text: str) -> Optional[str]:
+    """Fallback JSON extraction using lenient heuristics."""
+
+    # Try to find JSON with balanced braces
+    stack = []
+    start = None
+    for i, ch in enumerate(text):
+        if ch == '{':
+            if not stack:
+                start = i
+            stack.append(ch)
+        elif ch == '}':
+            if stack:
+                stack.pop()
+                if not stack and start is not None:
+                    candidate = text[start:i+1]
+                    try:
+                        json.loads(candidate)
+                        return candidate.strip()
+                    except Exception:
+                        start = None
+
+    return None
 
 def parse_gemini_response_safely(response_text: str, fallback_schema: dict):
     """Safely parse Gemini response with multiple fallback strategies"""
