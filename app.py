@@ -678,7 +678,7 @@ Return ONLY valid JSON-LD markup. Start with {{ and end with }}. No explanations
 # --- Streamlit UI ---
 st.set_page_config(page_title="Comprehensive Schema.org Generator", page_icon="🔗", layout="wide")
 
-st.title(" Comprehensive Schema.org JSON-LD Generator")
+st.title(" Schema.org JSON-LD Generator")
 
 # Sidebar Configuration
 st.sidebar.header(" Configuration")
@@ -992,7 +992,7 @@ if st.button(" Generate Comprehensive Schema", type="primary"):
 
 # Sidebar advanced options
 st.sidebar.markdown("---")
-st.sidebar.header("🛠️ Advanced Options")
+st.sidebar.header("Advanced Options")
 
 if st.sidebar.checkbox("Show Entity Data"):
     if 'comprehensive_data' in locals():
